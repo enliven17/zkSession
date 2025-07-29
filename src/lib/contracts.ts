@@ -118,11 +118,10 @@ export const SESSION_CONTRACT_ABI = [
 ] as const;
 
 // Contract address (XLayer testnet deployed)
-export const SESSION_CONTRACT_ADDRESS = "0xc0b33Cc720025dD0AcF56e249C8b76A6A34170B6" as const;
+export const SESSION_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_SESSION_CONTRACT_ADDRESS || "0xc0b33Cc720025dD0AcF56e249C8b76A6A34170B6" as const;
 
 // XLayer Testnet configuration
 export const XLAYER_CONFIG = {
-  chainId: 195,
-  rpcUrl: "https://testrpc.xlayer.tech",
-  blockExplorerUrl: "https://www.okx.com/web3/explorer/xlayer-test",
+  chainId: parseInt(process.env.NEXT_PUBLIC_XLAYER_CHAIN_ID || '196'),
+  rpcUrl: process.env.NEXT_PUBLIC_XLAYER_RPC_URL || "https://rpc.xlayer.tech",
 }; 

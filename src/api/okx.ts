@@ -1,10 +1,16 @@
 import axios from 'axios'
+import CryptoJS from 'crypto-js'
 
 // OKX DEX API Configuration
 const OKX_DEX_API_BASE = 'https://web3.okx.com/api/v5/dex/aggregator'
-const OKX_API_KEY = process.env.NEXT_PUBLIC_OKX_API_KEY || ''
-const OKX_SECRET_KEY = process.env.NEXT_PUBLIC_OKX_SECRET_KEY || ''
-const OKX_PASSPHRASE = process.env.NEXT_PUBLIC_OKX_PASSPHRASE || ''
+const OKX_API_KEY = process.env.NEXT_PUBLIC_OKX_API_KEY
+const OKX_SECRET_KEY = process.env.NEXT_PUBLIC_OKX_SECRET_KEY
+const OKX_PASSPHRASE = process.env.NEXT_PUBLIC_OKX_PASSPHRASE
+
+// Validate environment variables
+if (!OKX_API_KEY || !OKX_SECRET_KEY || !OKX_PASSPHRASE) {
+  console.error('Missing OKX API configuration. Please check your .env.local file.')
+}
 
 // Types
 export interface SwapRequest {
@@ -33,7 +39,7 @@ export interface TokenInfo {
   price?: string
 }
 
-// Token addresses for XLayer testnet
+// Token addresses for XLayer mainnet (OKX DEX supported)
 export const TOKENS: { [key: string]: TokenInfo } = {
   'ETH': {
     symbol: 'ETH',
@@ -42,17 +48,17 @@ export const TOKENS: { [key: string]: TokenInfo } = {
   },
   'USDT': {
     symbol: 'USDT',
-    address: '0x4f3C8E20942461e2c3Bdd8311AC57B0c222f2b82', // XLayer testnet USDT
+    address: '0x1c17e32e23437d63e2f91fd546a000f261e0b8fd', // XLayer mainnet USDT
     decimals: 6
   },
   'USDC': {
     symbol: 'USDC',
-    address: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', // XLayer testnet USDC
+    address: '0x176211869ca2b568f2a7d4ee941e073a821ee1ff', // XLayer mainnet USDC
     decimals: 6
   },
   'WBTC': {
     symbol: 'WBTC',
-    address: '0x3C1BCa5a656e69edcd0d4b36b5b1a1b8b0b5b1a1', // XLayer testnet WBTC (placeholder)
+    address: '0x9a5b2c5054c3e9c43864736a3cd11a3042aa6c38', // XLayer mainnet WBTC
     decimals: 8
   }
 }
@@ -69,23 +75,32 @@ export const generateXLayerProof = async (data: any): Promise<string> => {
 }
 
 // Create signature for OKX API
-export const createSignature = async (timestamp: string, method: string, requestPath: string, body: string = ''): Promise<string> => {
-  const message = timestamp + method + requestPath + body
-  // In production, this would use the actual secret key to create HMAC signature
-  const signatureData = {
-    message: message,
-    timestamp: timestamp,
-    signature: 'mock_signature_' + Math.random().toString(36).substring(7)
+export const createSignature = async (
+  timestamp: string,
+  method: string,
+  requestPath: string,
+  body: string = ''
+): Promise<string> => {
+  if (!OKX_SECRET_KEY) {
+    throw new Error('OKX_SECRET_KEY is not configured')
   }
-  return Buffer.from(JSON.stringify(signatureData)).toString('base64')
-}
+  
+  // OKX API signature format: timestamp + method + requestPath + body
+  const message = timestamp + method + requestPath + body;
+  const signature = CryptoJS.HmacSHA256(message, OKX_SECRET_KEY).toString(CryptoJS.enc.Base64);
+  console.log('[OKX SIGNATURE DEBUG]', { timestamp, method, requestPath, body, message, signature });
+  return signature;
+};
 
 // Get swap quote from OKX DEX
 export const getSwapQuote = async (request: SwapRequest): Promise<SwapResponse> => {
   try {
+    console.log('Getting OKX DEX quote for request:', request)
+    
     const timestamp = new Date().toISOString()
     const queryParams = new URLSearchParams({
       chainIndex: request.chainIndex,
+      chainId: request.chainIndex, // OKX API requires both chainIndex and chainId
       amount: request.amount,
       swapMode: request.swapMode,
       fromTokenAddress: request.fromTokenAddress,
@@ -96,24 +111,38 @@ export const getSwapQuote = async (request: SwapRequest): Promise<SwapResponse> 
       ...(request.gasLevel && { gasLevel: request.gasLevel })
     })
 
-    const signature = await createSignature(timestamp, 'GET', `/swap?${queryParams.toString()}`)
+    // Use full API path for requestPath (OKX expects /api/v5/dex/aggregator/quote?...)
+    const requestPath = `/api/v5/dex/aggregator/quote?${queryParams.toString()}`;
+    const signature = await createSignature(timestamp, 'GET', requestPath)
 
-    const response = await axios.get(`${OKX_DEX_API_BASE}/swap?${queryParams.toString()}`, {
+    console.log('Making OKX DEX API request:', {
+      url: `${OKX_DEX_API_BASE}${requestPath}`,
       headers: {
         'OK-ACCESS-KEY': OKX_API_KEY,
         'OK-ACCESS-SIGN': signature,
         'OK-ACCESS-PASSPHRASE': OKX_PASSPHRASE,
-        'OK-ACCESS-TIMESTAMP': timestamp,
-        'X-Layer-Proof': await generateXLayerProof(request)
+        'OK-ACCESS-TIMESTAMP': timestamp
       }
     })
 
+    const response = await axios.get(`${OKX_DEX_API_BASE}${requestPath}`, {
+      headers: {
+        'OK-ACCESS-KEY': OKX_API_KEY,
+        'OK-ACCESS-SIGN': signature,
+        'OK-ACCESS-PASSPHRASE': OKX_PASSPHRASE,
+        'OK-ACCESS-TIMESTAMP': timestamp
+      }
+    })
+
+    console.log('OKX DEX API response:', response.data)
+
     if (response.data.code === '0') {
+      const quoteData = response.data.data[0]
       return {
         success: true,
-        tx: response.data.data[0]?.tx,
-        routerResult: response.data.data[0]?.routerResult,
-        message: 'Quote received successfully'
+        tx: quoteData,
+        routerResult: quoteData,
+        message: `Quote received: ${quoteData.toTokenAmount} ${quoteData.toToken?.tokenSymbol} for ${quoteData.fromTokenAmount} ${quoteData.fromToken?.tokenSymbol}`
       }
     } else {
       return {
@@ -121,11 +150,21 @@ export const getSwapQuote = async (request: SwapRequest): Promise<SwapResponse> 
         message: response.data.msg || 'Failed to get quote'
       }
     }
-  } catch (error) {
-    console.error('Swap quote error:', error)
+  } catch (error: any) {
+    console.error('OKX DEX quote error:', error)
+    console.error('Error response:', error.response?.data)
+    
+    // If we get 401, it's likely due to missing secret key
+    if (error.response?.status === 401) {
+      return {
+        success: false,
+        message: 'Authentication failed. OKX API key is valid but secret key is required for signature generation.'
+      }
+    }
+    
     return {
       success: false,
-      message: error instanceof Error ? error.message : 'Failed to get swap quote'
+      message: error.response?.data?.msg || error.message || 'Failed to get swap quote'
     }
   }
 }
@@ -269,5 +308,86 @@ export async function getMarketData(symbol: string): Promise<any> {
   } catch (error: any) {
     console.error('Market data fetch error:', error)
     throw new Error(error.response?.data?.msg || error.message || 'Failed to fetch market data')
+  }
+} 
+
+// Test function to check supported tokens on XLayer
+export const testXLayerTokens = async () => {
+  try {
+    console.log('Testing XLayer token combinations...')
+    
+    // Test different token combinations
+    const testCases = [
+      {
+        name: 'ETH to USDT',
+        fromToken: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        toToken: '0x1c17e32e23437d63e2f91fd546a000f261e0b8fd',
+        amount: '1000000000000000000' // 1 ETH in wei
+      },
+      {
+        name: 'USDT to ETH',
+        fromToken: '0x1c17e32e23437d63e2f91fd546a000f261e0b8fd',
+        toToken: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        amount: '1000000' // 1 USDT (6 decimals)
+      },
+      {
+        name: 'ETH to USDC',
+        fromToken: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        toToken: '0x176211869ca2b568f2a7d4ee941e073a821ee1ff',
+        amount: '1000000000000000000' // 1 ETH in wei
+      }
+    ]
+    
+    const results = []
+    
+    for (const testCase of testCases) {
+      try {
+        const timestamp = new Date().toISOString()
+        const queryParams = new URLSearchParams({
+          chainIndex: '196',
+          chainId: '196',
+          amount: testCase.amount,
+          swapMode: 'exactIn',
+          fromTokenAddress: testCase.fromToken,
+          toTokenAddress: testCase.toToken,
+          slippage: '0.05',
+          userWalletAddress: '0x71197e7a1CA5A2cb2AD82432B924F69B1E3dB123'
+        })
+        
+        const requestPath = `/api/v5/dex/aggregator/quote?${queryParams.toString()}`
+        const signature = await createSignature(timestamp, 'GET', requestPath)
+        
+        const response = await axios.get(`${OKX_DEX_API_BASE}/quote?${queryParams.toString()}`, {
+          headers: {
+            'OK-ACCESS-KEY': OKX_API_KEY,
+            'OK-ACCESS-SIGN': signature,
+            'OK-ACCESS-PASSPHRASE': OKX_PASSPHRASE,
+            'OK-ACCESS-TIMESTAMP': timestamp
+          }
+        })
+        
+        results.push({
+          testCase: testCase.name,
+          success: true,
+          data: response.data
+        })
+        
+        console.log(`✅ ${testCase.name} - SUCCESS:`, response.data)
+      } catch (error: any) {
+        results.push({
+          testCase: testCase.name,
+          success: false,
+          error: error.response?.data || error.message
+        })
+        
+        console.log(`❌ ${testCase.name} - FAILED:`, error.response?.data || error.message)
+      }
+    }
+    
+    console.log('XLayer token test results:', results)
+    return results
+  } catch (error) {
+    console.error('XLayer tokens test error:', error)
+    return null
   }
 } 

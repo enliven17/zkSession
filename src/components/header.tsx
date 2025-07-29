@@ -71,12 +71,17 @@ export function Header() {
             ) : (
               <button
                 onClick={() => {
-                  // Try to connect with the first available connector
-                  const availableConnector = connectors.find(connector => connector.ready)
-                  if (availableConnector) {
-                    connect({ connector: availableConnector })
+                  console.log('Connect button clicked!')
+                  console.log('Available connectors:', connectors.map(c => ({ id: c.id, ready: c.ready, name: c.name })))
+                  
+                  // Simple approach: try the first ready connector
+                  const readyConnector = connectors.find(connector => connector.ready)
+                  
+                  if (readyConnector) {
+                    console.log('Connecting with ready connector:', readyConnector.id)
+                    connect({ connector: readyConnector })
                   } else {
-                    // Fallback to first connector
+                    console.log('No ready connectors, trying first connector...')
                     connect({ connector: connectors[0] })
                   }
                 }}

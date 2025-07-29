@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { useAccount } from 'wagmi'
-import { AlertCircle, TrendingUp, DollarSign, ArrowUpDown } from 'lucide-react'
-import { executeTrade, TOKENS, getSwapQuote, SwapRequest } from '@/api/okx'
+import { AlertCircle, TrendingUp, TrendingDown, DollarSign, Clock, Zap } from 'lucide-react'
+import { TOKENS, getSwapQuote, SwapRequest, testXLayerTokens } from '@/api/okx'
 
 interface TradeInterfaceProps {
   session: any
@@ -44,6 +44,26 @@ export function TradeInterface({ session }: TradeInterfaceProps) {
   const handleExecuteTrade = async () => {
     if (!amount || !session) return
     
+    // Validate amount
+    const amountValue = parseFloat(amount)
+    if (isNaN(amountValue) || amountValue <= 0) {
+      setTradeResult({
+        success: false,
+        message: 'Please enter a valid amount'
+      })
+      return
+    }
+    
+    // Check if amount exceeds remaining budget
+    const remainingBudget = getRemainingBudget()
+    if (amountValue > remainingBudget) {
+      setTradeResult({
+        success: false,
+        message: `Amount exceeds remaining budget. You have $${remainingBudget.toFixed(2)} available.`
+      })
+      return
+    }
+    
     setIsExecuting(true)
     setTradeResult(null)
     
@@ -53,9 +73,22 @@ export function TradeInterface({ session }: TradeInterfaceProps) {
       const fromToken = side === 'buy' ? quoteToken : baseToken
       const toToken = side === 'buy' ? baseToken : quoteToken
       
+      // Debug: Log token conversion
+      console.log('Token conversion:', {
+        symbol,
+        baseToken,
+        quoteToken,
+        side,
+        fromToken,
+        toToken,
+        fromTokenAddress: TOKENS[fromToken]?.address,
+        toTokenAddress: TOKENS[toToken]?.address,
+        chainIndex: '196' // XLayer
+      })
+      
       // Create swap request
       const swapRequest: SwapRequest = {
-        chainIndex: '195', // XLayer testnet
+        chainIndex: '196', // XLayer mainnet (OKX DEX supported)
         amount: (parseFloat(amount) * Math.pow(10, TOKENS[fromToken]?.decimals || 18)).toString(),
         swapMode: 'exactIn',
         fromTokenAddress: TOKENS[fromToken]?.address || TOKENS.ETH.address,
@@ -64,6 +97,8 @@ export function TradeInterface({ session }: TradeInterfaceProps) {
         userWalletAddress: session.user || '0x0000000000000000000000000000000000000000',
         gasLevel: 'average'
       }
+
+      console.log('Swap request:', swapRequest)
 
       // Get quote first
       const quote = await getSwapQuote(swapRequest)
@@ -88,6 +123,25 @@ export function TradeInterface({ session }: TradeInterfaceProps) {
       })
     } finally {
       setIsExecuting(false)
+    }
+  }
+
+  const handleTestXLayerTokens = async () => {
+    try {
+      console.log('Testing XLayer tokens...')
+      const result = await testXLayerTokens()
+      console.log('XLayer tokens test result:', result)
+      
+      setTradeResult({
+        success: true,
+        message: `XLayer tokens test completed. Check console for details.`
+      })
+    } catch (error) {
+      console.error('XLayer tokens test error:', error)
+      setTradeResult({
+        success: false,
+        message: 'Failed to test XLayer tokens'
+      })
     }
   }
 
@@ -300,6 +354,16 @@ export function TradeInterface({ session }: TradeInterfaceProps) {
             </div>
           )}
         </button>
+
+        {/* Test Button */}
+        <div className="mt-4">
+          <button
+            onClick={handleTestXLayerTokens}
+            className="w-full px-4 py-3 bg-yellow-600 hover:bg-yellow-700 text-white font-medium rounded-lg transition-colors"
+          >
+            Test XLayer Token Support
+          </button>
+        </div>
       </div>
 
       {/* Trade Result */}

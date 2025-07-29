@@ -35,13 +35,13 @@ const { chains, publicClient } = configureChains(
 const config = createConfig({
   autoConnect: false, // Disable autoConnect to prevent connection issues
   connectors: [
-    new InjectedConnector({ 
+    new MetaMaskConnector({ 
       chains,
       options: {
-        shimDisconnect: true, // Keep connection state even if wallet disconnects
+        shimDisconnect: true,
       }
     }),
-    new MetaMaskConnector({ 
+    new InjectedConnector({ 
       chains,
       options: {
         shimDisconnect: true,
@@ -50,7 +50,7 @@ const config = createConfig({
     new WalletConnectConnector({ 
       chains, 
       options: { 
-        projectId: 'c4f79cc821944d9680842e34466bfbd9',
+        projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'c4f79cc821944d9680842e34466bfbd9',
         showQrModal: true,
       } 
     }),

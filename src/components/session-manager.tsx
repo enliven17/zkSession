@@ -27,12 +27,21 @@ export function SessionManager({ session, onSessionChange }: SessionManagerProps
   const [error, setError] = useState<string | null>(null)
   const [transactionHash, setTransactionHash] = useState<string | null>(null)
 
+  // Debug logging
+  console.log('SessionManager - Component rendered')
+  console.log('SessionManager - isConnected:', isConnected)
+  console.log('SessionManager - address:', address)
+  console.log('SessionManager - current session:', session)
+
   useEffect(() => {
     setMounted(true)
   }, [])
 
   useEffect(() => {
     // Check for existing session when address changes (wallet connects/disconnects)
+    console.log('SessionManager - Address changed:', address)
+    console.log('SessionManager - Ethereum available:', !!(window as any).ethereum)
+    
     if (address && (window as any).ethereum) {
       console.log('Wallet connected, checking for existing session:', address)
       checkExistingSession()
