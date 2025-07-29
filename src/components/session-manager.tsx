@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
-import { useAccount, useContractWrite, useWaitForTransaction } from 'wagmi'
+import { useState, useEffect } from 'react'
+import { useAccount } from 'wagmi'
+import { ethers } from 'ethers'
 import { SESSION_CONTRACT_ABI, SESSION_CONTRACT_ADDRESS } from '@/lib/contracts'
 import { AlertCircle, Play, Clock, DollarSign, Zap } from 'lucide-react'
 
@@ -18,39 +19,158 @@ interface SessionManagerProps {
 }
 
 export function SessionManager({ session, onSessionChange }: SessionManagerProps) {
+  const [mounted, setMounted] = useState(false)
   const { address, isConnected } = useAccount()
   const [duration, setDuration] = useState('86400')
   const [spendLimit, setSpendLimit] = useState('500')
   const [isCreating, setIsCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [transactionHash, setTransactionHash] = useState<string | null>(null)
 
-  const { write: createSession, data: createData } = useContractWrite({
-    address: SESSION_CONTRACT_ADDRESS as `0x${string}`,
-    abi: SESSION_CONTRACT_ABI,
-    functionName: 'createSession',
-  })
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
-  const { isLoading: isCreatingSession } = useWaitForTransaction({
-    hash: createData?.hash,
-    onSuccess: () => {
+  useEffect(() => {
+    // Check for existing session when address changes (wallet connects/disconnects)
+    if (address && (window as any).ethereum) {
+      console.log('Wallet connected, checking for existing session:', address)
+      checkExistingSession()
+    } else if (!address) {
+      // Clear session when wallet disconnects
+      console.log('Wallet disconnected, clearing session')
+      onSessionChange(null)
+    }
+  }, [address])
+
+  const checkExistingSession = async () => {
+    try {
+      console.log('Checking existing session for address:', address)
+      console.log('Contract address:', SESSION_CONTRACT_ADDRESS)
+      
+      const provider = new ethers.providers.Web3Provider((window as any).ethereum)
+      const contract = new ethers.Contract(SESSION_CONTRACT_ADDRESS, SESSION_CONTRACT_ABI, provider)
+      
+      console.log('Calling getSession...')
+      const existingSession = await contract.getSession(address)
+      
+      console.log('Raw session data from contract:', existingSession)
+      
+      if (existingSession && existingSession.isActive && address) {
+        console.log('Active session found!')
+        const sessionData = {
+          user: address,
+          expiry: existingSession.expiry.toNumber() * 1000, // Convert to milliseconds
+          spendLimit: existingSession.spendLimit.toNumber(),
+          spent: existingSession.spent.toNumber(),
+        }
+        console.log('Processed session data:', sessionData)
+        onSessionChange(sessionData)
+      } else {
+        console.log('No active session found or session is inactive')
+        console.log('existingSession:', existingSession)
+        console.log('existingSession.isActive:', existingSession?.isActive)
+      }
+    } catch (error: any) {
+      console.error('Error checking existing session:', error)
+      console.error('Error details:', {
+        message: error.message,
+        code: error.code,
+        data: error.data
+      })
+    }
+  }
+
+  const createSessionWithEthers = async () => {
+    if (!(window as any).ethereum || !address) return
+
+    try {
+      const provider = new ethers.providers.Web3Provider((window as any).ethereum)
+      const signer = provider.getSigner()
+      const contract = new ethers.Contract(SESSION_CONTRACT_ADDRESS, SESSION_CONTRACT_ABI, signer)
+
+      console.log('Creating session with ethers:', {
+        duration: BigInt(duration),
+        spendLimit: BigInt(spendLimit),
+        address: SESSION_CONTRACT_ADDRESS
+      })
+
+      const tx = await contract.createSession(BigInt(duration), BigInt(spendLimit))
+      setTransactionHash(tx.hash)
+      
+      console.log('Transaction sent:', tx.hash)
+      
+      // Wait for transaction confirmation
+      const receipt = await tx.wait()
+      console.log('Transaction confirmed:', receipt)
+      
       setIsCreating(false)
-      // Mock session data for demo
-      const mockSession = {
-        user: address!,
+      setError(null)
+      
+      // Create session data
+      const sessionData = {
+        user: address,
         expiry: Date.now() + parseInt(duration) * 1000,
         spendLimit: parseInt(spendLimit),
         spent: 0,
       }
-      onSessionChange(mockSession)
-    },
-  })
+      onSessionChange(sessionData)
+      
+    } catch (error: any) {
+      console.error('Error creating session:', error)
+      
+      // Check if session already exists
+      if (error.message && error.message.includes('Session already exists')) {
+        setError('Session already exists for this address. Please use a different wallet or wait for the current session to expire.')
+        
+        // Try to get existing session
+        try {
+          const provider = new ethers.providers.Web3Provider((window as any).ethereum)
+          const contract = new ethers.Contract(SESSION_CONTRACT_ADDRESS, SESSION_CONTRACT_ABI, provider)
+          const existingSession = await contract.getSession(address)
+          
+          console.log('Existing session found:', existingSession)
+          
+          if (existingSession && existingSession.isActive) {
+            const sessionData = {
+              user: address,
+              expiry: existingSession.expiry.toNumber() * 1000, // Convert to milliseconds
+              spendLimit: existingSession.spendLimit.toNumber(),
+              spent: existingSession.spent.toNumber(),
+            }
+            onSessionChange(sessionData)
+          }
+        } catch (getSessionError) {
+          console.error('Error getting existing session:', getSessionError)
+        }
+      } else {
+        setError(error.message || 'Failed to create session')
+      }
+      setIsCreating(false)
+    }
+  }
+
+  if (!mounted) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-gray-700/50 rounded-xl p-4 animate-pulse">
+          <div className="h-4 bg-gray-600 rounded w-1/2 mb-4"></div>
+          <div className="space-y-3">
+            <div className="h-10 bg-gray-600 rounded"></div>
+            <div className="h-10 bg-gray-600 rounded"></div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const handleCreateSession = () => {
     if (!duration || !spendLimit) return
     
+    setError(null)
     setIsCreating(true)
-    createSession({
-      args: [BigInt(duration), BigInt(spendLimit) * BigInt(10 ** 18)],
-    })
+    
+    createSessionWithEthers()
   }
 
   const getTimeRemaining = () => {
@@ -196,13 +316,40 @@ export function SessionManager({ session, onSessionChange }: SessionManagerProps
         </div>
       </div>
 
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-900/20 border border-red-700/30 rounded-lg p-3">
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="h-4 w-4 text-red-400" />
+            <span className="text-red-400 text-sm">{error}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Transaction Status */}
+      {transactionHash && (
+        <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg p-3">
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+            <span className="text-blue-400 text-sm">
+              Transaction submitted: {transactionHash.slice(0, 6)}...{transactionHash.slice(-4)}
+            </span>
+          </div>
+          {isCreating && (
+            <div className="mt-2 text-xs text-blue-300">
+              Waiting for confirmation...
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Create Button */}
       <button
         onClick={handleCreateSession}
-        disabled={isCreating || isCreatingSession || !duration || !spendLimit}
+        disabled={isCreating || !duration || !spendLimit}
         className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold py-3 px-6 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none text-sm"
       >
-        {isCreating || isCreatingSession ? (
+        {isCreating ? (
           <div className="flex items-center justify-center space-x-2">
             <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
             <span>Creating Session...</span>

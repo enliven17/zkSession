@@ -33,7 +33,7 @@ export interface TokenInfo {
   price?: string
 }
 
-// Token addresses for common tokens (Ethereum mainnet)
+// Token addresses for XLayer testnet
 export const TOKENS: { [key: string]: TokenInfo } = {
   'ETH': {
     symbol: 'ETH',
@@ -42,17 +42,17 @@ export const TOKENS: { [key: string]: TokenInfo } = {
   },
   'USDT': {
     symbol: 'USDT',
-    address: '0xdac17f958d2ee523a2206206994597c13d831ec7',
+    address: '0x4f3C8E20942461e2c3Bdd8311AC57B0c222f2b82', // XLayer testnet USDT
     decimals: 6
   },
   'USDC': {
     symbol: 'USDC',
-    address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+    address: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', // XLayer testnet USDC
     decimals: 6
   },
   'WBTC': {
     symbol: 'WBTC',
-    address: '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599',
+    address: '0x3C1BCa5a656e69edcd0d4b36b5b1a1b8b0b5b1a1', // XLayer testnet WBTC (placeholder)
     decimals: 8
   }
 }

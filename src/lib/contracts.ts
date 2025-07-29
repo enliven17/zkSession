@@ -1,48 +1,128 @@
 // XLayer Session Contract ABI
 export const SESSION_CONTRACT_ABI = [
-  // Session struct
-  "struct Session { address user; uint256 expiry; uint256 spendLimit; uint256 spent; bool isActive; }",
+  // Functions
+  {
+    "inputs": [
+      {"internalType": "uint256", "name": "_expiry", "type": "uint256"},
+      {"internalType": "uint256", "name": "_limit", "type": "uint256"}
+    ],
+    "name": "createSession",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "address", "name": "_user", "type": "address"},
+      {"internalType": "uint256", "name": "_amount", "type": "uint256"}
+    ],
+    "name": "executeTrade",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "address", "name": "_user", "type": "address"}],
+    "name": "getSession",
+    "outputs": [
+      {"internalType": "address", "name": "user", "type": "address"},
+      {"internalType": "uint256", "name": "expiry", "type": "uint256"},
+      {"internalType": "uint256", "name": "spendLimit", "type": "uint256"},
+      {"internalType": "uint256", "name": "spent", "type": "uint256"},
+      {"internalType": "bool", "name": "isActive", "type": "bool"}
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "address", "name": "_user", "type": "address"}],
+    "name": "isSessionValid",
+    "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "address", "name": "_user", "type": "address"}],
+    "name": "getRemainingLimit",
+    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "address", "name": "_trader", "type": "address"}],
+    "name": "authorizeTrader",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "address", "name": "_trader", "type": "address"}],
+    "name": "revokeTrader",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "address", "name": "_user", "type": "address"}],
+    "name": "emergencyExpireSession",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
   
   // Events
-  "event SessionCreated(address indexed user, uint256 expiry, uint256 spendLimit)",
-  "event TradeExecuted(address indexed user, uint256 amount, uint256 remaining)",
-  "event SessionExpired(address indexed user)",
-  "event TraderAuthorized(address indexed trader)",
-  "event TraderRevoked(address indexed trader)",
-  
-  // Functions
-  "function createSession(uint256 duration, uint256 spendLimit) external",
-  "function executeTrade(uint256 amount) external returns (bool)",
-  "function getSession(address user) external view returns (Session memory)",
-  "function isSessionValid(address user) external view returns (bool)",
-  "function getRemainingLimit(address user) external view returns (uint256)",
-  "function authorizeTrader(address trader) external",
-  "function revokeTrader(address trader) external",
-  "function emergencyExpireSession(address user) external",
-  
-  // Mappings
-  "mapping(address => Session) public sessions",
-  "mapping(address => bool) public authorizedTraders"
+  {
+    "anonymous": false,
+    "inputs": [
+      {"indexed": true, "internalType": "address", "name": "user", "type": "address"},
+      {"indexed": false, "internalType": "uint256", "name": "expiry", "type": "uint256"},
+      {"indexed": false, "internalType": "uint256", "name": "spendLimit", "type": "uint256"}
+    ],
+    "name": "SessionCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {"indexed": true, "internalType": "address", "name": "user", "type": "address"},
+      {"indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256"},
+      {"indexed": false, "internalType": "uint256", "name": "remaining", "type": "uint256"}
+    ],
+    "name": "TradeExecuted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {"indexed": true, "internalType": "address", "name": "user", "type": "address"}
+    ],
+    "name": "SessionExpired",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {"indexed": true, "internalType": "address", "name": "trader", "type": "address"}
+    ],
+    "name": "TraderAuthorized",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {"indexed": true, "internalType": "address", "name": "trader", "type": "address"}
+    ],
+    "name": "TraderRevoked",
+    "type": "event"
+  }
 ] as const;
 
-// Contract address (will be updated after deployment to XLayer testnet)
-export const SESSION_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_SESSION_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000';
+// Contract address (XLayer testnet deployed)
+export const SESSION_CONTRACT_ADDRESS = "0xc0b33Cc720025dD0AcF56e249C8b76A6A34170B6" as const;
 
-// XLayer Testnet configuration from official docs
-export const XLAYER_TESTNET_CONFIG = {
+// XLayer Testnet configuration
+export const XLAYER_CONFIG = {
   chainId: 195,
-  name: 'X Layer Testnet',
-  network: 'xlayer-testnet',
-  nativeCurrency: {
-    decimals: 18,
-    name: 'OKB',
-    symbol: 'OKB',
-  },
-  rpcUrls: {
-    public: { http: ['https://testrpc.xlayer.tech'] },
-    default: { http: ['https://testrpc.xlayer.tech'] },
-  },
-  blockExplorers: {
-    default: { name: 'XLayer Explorer', url: 'https://www.okx.com/web3/explorer/xlayer-test' },
-  },
-} as const; 
+  rpcUrl: "https://testrpc.xlayer.tech",
+  blockExplorerUrl: "https://www.okx.com/web3/explorer/xlayer-test",
+}; 

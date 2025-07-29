@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAccount } from 'wagmi'
 import { AlertCircle, TrendingUp, DollarSign, ArrowUpDown } from 'lucide-react'
 import { executeTrade, TOKENS, getSwapQuote, SwapRequest } from '@/api/okx'
@@ -10,12 +10,31 @@ interface TradeInterfaceProps {
 }
 
 export function TradeInterface({ session }: TradeInterfaceProps) {
+  const [mounted, setMounted] = useState(false)
   const { isConnected } = useAccount()
   const [symbol, setSymbol] = useState('BTC-USDT')
   const [side, setSide] = useState<'buy' | 'sell'>('buy')
   const [amount, setAmount] = useState('')
   const [isExecuting, setIsExecuting] = useState(false)
   const [tradeResult, setTradeResult] = useState<any>(null)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!mounted) {
+    return (
+      <div className="text-center py-12">
+        <div className="w-20 h-20 bg-gray-700/50 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+          <div className="w-10 h-10 bg-gray-600 rounded"></div>
+        </div>
+        <div className="space-y-3">
+          <div className="h-6 bg-gray-600 rounded w-48 mx-auto"></div>
+          <div className="h-4 bg-gray-600 rounded w-64 mx-auto"></div>
+        </div>
+      </div>
+    )
+  }
 
   const getRemainingBudget = () => {
     if (!session) return 0
@@ -36,7 +55,7 @@ export function TradeInterface({ session }: TradeInterfaceProps) {
       
       // Create swap request
       const swapRequest: SwapRequest = {
-        chainIndex: '1', // Ethereum mainnet
+        chainIndex: '195', // XLayer testnet
         amount: (parseFloat(amount) * Math.pow(10, TOKENS[fromToken]?.decimals || 18)).toString(),
         swapMode: 'exactIn',
         fromTokenAddress: TOKENS[fromToken]?.address || TOKENS.ETH.address,
@@ -104,7 +123,19 @@ export function TradeInterface({ session }: TradeInterfaceProps) {
     )
   }
 
-  if (!session?.isActive) {
+  // Check if session is active
+  const isSessionActive = session && Date.now() < session.expiry
+
+  // Debug: Log session info
+  console.log('TradeInterface - Session:', session)
+  console.log('TradeInterface - isSessionActive:', isSessionActive)
+  console.log('TradeInterface - Current time:', Date.now())
+  console.log('TradeInterface - Session expiry:', session?.expiry)
+  console.log('TradeInterface - Session user:', session?.user)
+  console.log('TradeInterface - Session spendLimit:', session?.spendLimit)
+  console.log('TradeInterface - Session spent:', session?.spent)
+
+  if (!isSessionActive) {
     return (
       <div className="text-center py-12">
         <div className="w-20 h-20 bg-gray-700/50 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -136,7 +167,7 @@ export function TradeInterface({ session }: TradeInterfaceProps) {
     <div className="space-y-6">
       {/* Trading Status */}
       <div className="bg-gradient-to-r from-blue-900/20 to-indigo-900/20 border border-blue-700/30 rounded-xl p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-3">
           <div className="flex items-center space-x-3">
             <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
               <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -151,6 +182,24 @@ export function TradeInterface({ session }: TradeInterfaceProps) {
           <div className="text-right">
             <div className="text-sm text-blue-400">Remaining Budget</div>
             <div className="font-bold text-blue-300 text-lg">${getRemainingBudget().toFixed(2)}</div>
+          </div>
+        </div>
+        
+        {/* Session Details */}
+        <div className="grid grid-cols-3 gap-4 text-sm">
+          <div className="bg-blue-900/20 rounded-lg p-3">
+            <div className="text-blue-300 mb-1">Total Limit</div>
+            <div className="text-white font-semibold">${session.spendLimit.toFixed(2)}</div>
+          </div>
+          <div className="bg-blue-900/20 rounded-lg p-3">
+            <div className="text-blue-300 mb-1">Amount Used</div>
+            <div className="text-white font-semibold">${session.spent.toFixed(2)}</div>
+          </div>
+          <div className="bg-blue-900/20 rounded-lg p-3">
+            <div className="text-blue-300 mb-1">Time Left</div>
+            <div className="text-white font-semibold">
+              {Math.max(0, Math.floor((session.expiry - Date.now()) / (1000 * 60 * 60)))}h {Math.max(0, Math.floor(((session.expiry - Date.now()) % (1000 * 60 * 60)) / (1000 * 60)))}m
+            </div>
           </div>
         </div>
       </div>
