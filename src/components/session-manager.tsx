@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAccount } from 'wagmi'
+import { useAccount, useNetwork, useSwitchNetwork } from 'wagmi'
 import { ethers } from 'ethers'
 import { SESSION_CONTRACT_ABI, SESSION_CONTRACT_ADDRESS } from '@/lib/contracts'
 import { AlertCircle, Play, Clock, DollarSign, Zap } from 'lucide-react'
@@ -20,98 +20,188 @@ interface SessionManagerProps {
 
 export function SessionManager({ session, onSessionChange }: SessionManagerProps) {
   const [mounted, setMounted] = useState(false)
-  const { address, isConnected } = useAccount()
+  const [isLoading, setIsLoading] = useState(true)
+  const { address, isConnected, isConnecting, status } = useAccount()
+  const { chain } = useNetwork()
+  const { switchNetwork } = useSwitchNetwork()
   const [duration, setDuration] = useState('86400')
   const [spendLimit, setSpendLimit] = useState('500')
   const [isCreating, setIsCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [transactionHash, setTransactionHash] = useState<string | null>(null)
 
-  // Debug logging
+  // Enhanced debug logging
+  console.log('=== SessionManager Debug ===')
   console.log('SessionManager - Component rendered')
+  console.log('SessionManager - status:', status)
   console.log('SessionManager - isConnected:', isConnected)
+  console.log('SessionManager - isConnecting:', isConnecting)
   console.log('SessionManager - address:', address)
+  console.log('SessionManager - chain:', chain?.id, chain?.name)
   console.log('SessionManager - current session:', session)
+  console.log('SessionManager - mounted:', mounted)
+  console.log('SessionManager - isLoading:', isLoading)
+  console.log('SessionManager - window.ethereum:', typeof window !== 'undefined' ? !!(window as any).ethereum : 'SSR')
+  console.log('SessionManager - SESSION_CONTRACT_ADDRESS:', SESSION_CONTRACT_ADDRESS)
+  console.log('================================')
 
   useEffect(() => {
+    console.log('SessionManager - useEffect: Setting mounted to true')
     setMounted(true)
+    // Set loading to false after a short delay to show proper UI
+    const timer = setTimeout(() => {
+      console.log('SessionManager - Timer: Setting isLoading to false')
+      setIsLoading(false)
+    }, 1000)
+    return () => clearTimeout(timer)
   }, [])
+
+  // Auto-switch to XLayer testnet when wallet connects
+  useEffect(() => {
+    if (isConnected && chain && chain.id !== 195 && switchNetwork) {
+      console.log('SessionManager - Auto-switching to XLayer testnet (Chain ID: 195)')
+      console.log('SessionManager - Current chain:', chain.id, chain.name)
+      switchNetwork(195)
+    }
+  }, [isConnected, chain, switchNetwork])
 
   useEffect(() => {
     // Check for existing session when address changes (wallet connects/disconnects)
+    console.log('SessionManager - useEffect: Address/status changed')
     console.log('SessionManager - Address changed:', address)
+    console.log('SessionManager - Status changed:', status)
+    console.log('SessionManager - Chain:', chain?.id, chain?.name)
     console.log('SessionManager - Ethereum available:', !!(window as any).ethereum)
     
-    if (address && (window as any).ethereum) {
-      console.log('Wallet connected, checking for existing session:', address)
+    if (address && typeof window !== 'undefined' && (window as any).ethereum && !isConnecting && status === 'connected') {
+      console.log('SessionManager - Wallet connected, checking for existing session:', address)
       checkExistingSession()
-    } else if (!address) {
+    } else if (!address && !isConnecting && status === 'disconnected') {
       // Clear session when wallet disconnects
-      console.log('Wallet disconnected, clearing session')
+      console.log('SessionManager - Wallet disconnected, clearing session')
       onSessionChange(null)
+      setIsLoading(false)
+    } else {
+      console.log('SessionManager - Waiting for wallet connection...')
+      console.log('SessionManager - Status:', status)
+      console.log('SessionManager - isConnecting:', isConnecting)
     }
-  }, [address])
+  }, [address, isConnecting, status, chain])
 
   const checkExistingSession = async () => {
     try {
-      console.log('Checking existing session for address:', address)
-      console.log('Contract address:', SESSION_CONTRACT_ADDRESS)
+      setIsLoading(true)
+      console.log('SessionManager - checkExistingSession: Starting...')
+      console.log('SessionManager - Checking existing session for address:', address)
+      console.log('SessionManager - Contract address:', SESSION_CONTRACT_ADDRESS)
       
       const provider = new ethers.providers.Web3Provider((window as any).ethereum)
+      
+      // Ensure we're on the correct network
+      const network = await provider.getNetwork()
+      console.log('SessionManager - Current network:', network)
+      
+      if (network.chainId !== 195) {
+        console.log('SessionManager - Wrong network, switching to XLayer testnet...')
+        try {
+          await (window as any).ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: '0xC3' }], // 195 in hex
+          })
+        } catch (error) {
+          console.error('SessionManager - Failed to switch network:', error)
+          setError('Please switch to XLayer Testnet to use sessions')
+          return
+        }
+      }
+      
       const contract = new ethers.Contract(SESSION_CONTRACT_ADDRESS, SESSION_CONTRACT_ABI, provider)
       
-      console.log('Calling getSession...')
+      console.log('SessionManager - Calling getSession...')
       const existingSession = await contract.getSession(address)
       
-      console.log('Raw session data from contract:', existingSession)
+      console.log('SessionManager - Raw session data from contract:', existingSession)
       
       if (existingSession && existingSession.isActive && address) {
-        console.log('Active session found!')
+        console.log('SessionManager - Active session found!')
         const sessionData = {
           user: address,
           expiry: existingSession.expiry.toNumber() * 1000, // Convert to milliseconds
-          spendLimit: existingSession.spendLimit.toNumber(),
-          spent: existingSession.spent.toNumber(),
+          spendLimit: parseFloat(ethers.utils.formatEther(existingSession.spendLimit)),
+          spent: parseFloat(ethers.utils.formatEther(existingSession.spent)),
         }
-        console.log('Processed session data:', sessionData)
+        console.log('SessionManager - Processed session data:', sessionData)
         onSessionChange(sessionData)
       } else {
-        console.log('No active session found or session is inactive')
-        console.log('existingSession:', existingSession)
-        console.log('existingSession.isActive:', existingSession?.isActive)
+        console.log('SessionManager - No active session found or session is inactive')
+        console.log('SessionManager - existingSession:', existingSession)
+        console.log('SessionManager - existingSession.isActive:', existingSession?.isActive)
+        onSessionChange(null)
       }
     } catch (error: any) {
-      console.error('Error checking existing session:', error)
-      console.error('Error details:', {
+      console.error('SessionManager - Error checking existing session:', error)
+      console.error('SessionManager - Error details:', {
         message: error.message,
         code: error.code,
         data: error.data
       })
+      // Don't show error for session check, just set to null
+      onSessionChange(null)
+    } finally {
+      console.log('SessionManager - checkExistingSession: Setting isLoading to false')
+      setIsLoading(false)
     }
   }
 
   const createSessionWithEthers = async () => {
-    if (!(window as any).ethereum || !address) return
+    if (typeof window === 'undefined' || !(window as any).ethereum || !address) return
 
     try {
+      setIsCreating(true)
+      setError(null)
+      
       const provider = new ethers.providers.Web3Provider((window as any).ethereum)
+      
+      // Ensure we're on the correct network
+      const network = await provider.getNetwork()
+      console.log('SessionManager - Creating session on network:', network)
+      
+      if (network.chainId !== 195) {
+        console.log('SessionManager - Wrong network for session creation, switching to XLayer testnet...')
+        try {
+          await (window as any).ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: '0xC3' }], // 195 in hex
+          })
+        } catch (error) {
+          console.error('SessionManager - Failed to switch network for session creation:', error)
+          setError('Please switch to XLayer Testnet to create sessions')
+          return
+        }
+      }
+      
       const signer = provider.getSigner()
       const contract = new ethers.Contract(SESSION_CONTRACT_ADDRESS, SESSION_CONTRACT_ABI, signer)
 
-      console.log('Creating session with ethers:', {
-        duration: BigInt(duration),
-        spendLimit: BigInt(spendLimit),
+      // Convert duration to seconds and ensure it's a valid number
+      const durationInSeconds = parseInt(duration) * 60 // Convert minutes to seconds
+      const spendLimitInWei = ethers.utils.parseEther(spendLimit.toString()) // Convert to wei
+
+      console.log('SessionManager - Creating session with ethers:', {
+        duration: durationInSeconds,
+        spendLimit: spendLimitInWei.toString(),
         address: SESSION_CONTRACT_ADDRESS
       })
 
-      const tx = await contract.createSession(BigInt(duration), BigInt(spendLimit))
+      // Call createSession with proper parameters
+      const tx = await contract.createSession(durationInSeconds, spendLimitInWei)
       setTransactionHash(tx.hash)
       
-      console.log('Transaction sent:', tx.hash)
+      console.log('SessionManager - Transaction sent:', tx.hash)
       
       // Wait for transaction confirmation
       const receipt = await tx.wait()
-      console.log('Transaction confirmed:', receipt)
+      console.log('SessionManager - Transaction confirmed:', receipt)
       
       setIsCreating(false)
       setError(null)
@@ -119,14 +209,14 @@ export function SessionManager({ session, onSessionChange }: SessionManagerProps
       // Create session data
       const sessionData = {
         user: address,
-        expiry: Date.now() + parseInt(duration) * 1000,
+        expiry: Date.now() + parseInt(duration) * 60 * 1000, // Convert to milliseconds
         spendLimit: parseInt(spendLimit),
         spent: 0,
       }
       onSessionChange(sessionData)
       
     } catch (error: any) {
-      console.error('Error creating session:', error)
+      console.error('SessionManager - Error creating session:', error)
       
       // Check if session already exists
       if (error.message && error.message.includes('Session already exists')) {
@@ -138,28 +228,30 @@ export function SessionManager({ session, onSessionChange }: SessionManagerProps
           const contract = new ethers.Contract(SESSION_CONTRACT_ADDRESS, SESSION_CONTRACT_ABI, provider)
           const existingSession = await contract.getSession(address)
           
-          console.log('Existing session found:', existingSession)
+          console.log('SessionManager - Existing session found:', existingSession)
           
           if (existingSession && existingSession.isActive) {
             const sessionData = {
               user: address,
               expiry: existingSession.expiry.toNumber() * 1000, // Convert to milliseconds
-              spendLimit: existingSession.spendLimit.toNumber(),
-              spent: existingSession.spent.toNumber(),
+              spendLimit: parseFloat(ethers.utils.formatEther(existingSession.spendLimit)),
+              spent: parseFloat(ethers.utils.formatEther(existingSession.spent)),
             }
             onSessionChange(sessionData)
           }
         } catch (getSessionError) {
-          console.error('Error getting existing session:', getSessionError)
+          console.error('SessionManager - Error getting existing session:', getSessionError)
         }
       } else {
-        setError(error.message || 'Failed to create session')
+        setError(`Failed to create session: ${error.message}`)
       }
+      
       setIsCreating(false)
     }
   }
 
-  if (!mounted) {
+  if (!mounted || isLoading) {
+    console.log('SessionManager - Rendering loading state')
     return (
       <div className="space-y-6">
         <div className="bg-gray-700/50 rounded-xl p-4 animate-pulse">
@@ -177,8 +269,6 @@ export function SessionManager({ session, onSessionChange }: SessionManagerProps
     if (!duration || !spendLimit) return
     
     setError(null)
-    setIsCreating(true)
-    
     createSessionWithEthers()
   }
 
@@ -198,7 +288,26 @@ export function SessionManager({ session, onSessionChange }: SessionManagerProps
 
   const isSessionActive = session && Date.now() < session.expiry
 
+  console.log('SessionManager - Rendering main UI')
+  console.log('SessionManager - isConnecting:', isConnecting)
+  console.log('SessionManager - isConnected:', isConnected)
+  console.log('SessionManager - status:', status)
+
+  if (isConnecting) {
+    console.log('SessionManager - Rendering connecting state')
+    return (
+      <div className="text-center py-8">
+        <div className="w-16 h-16 bg-gray-700/50 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+        <h3 className="text-lg font-semibold text-white mb-2">Connecting Wallet...</h3>
+        <p className="text-gray-400 text-sm">Please approve the connection in your wallet</p>
+      </div>
+    )
+  }
+
   if (!isConnected) {
+    console.log('SessionManager - Rendering not connected state')
     return (
       <div className="text-center py-8">
         <div className="w-16 h-16 bg-gray-700/50 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -222,6 +331,7 @@ export function SessionManager({ session, onSessionChange }: SessionManagerProps
   }
 
   if (isSessionActive) {
+    console.log('SessionManager - Rendering active session state')
     return (
       <div className="space-y-6">
         {/* Active Session Status */}
@@ -275,8 +385,34 @@ export function SessionManager({ session, onSessionChange }: SessionManagerProps
     )
   }
 
+  console.log('SessionManager - Rendering create session form')
   return (
     <div className="space-y-6">
+      {/* Chain Warning */}
+      {isConnected && chain && chain.id !== 195 && (
+        <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <AlertCircle className="w-5 h-5 text-yellow-400" />
+              <div>
+                <h4 className="font-semibold text-yellow-400">Wrong Network</h4>
+                <p className="text-yellow-300 text-sm">
+                  Please switch to XLayer Testnet to use sessions
+                </p>
+              </div>
+            </div>
+            {switchNetwork && (
+              <button
+                onClick={() => switchNetwork(195)}
+                className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+              >
+                Switch to XLayer
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Session Creation Form */}
       <div className="bg-gray-700/50 rounded-xl p-4">
         <h4 className="font-semibold text-white mb-4">Create New Session</h4>

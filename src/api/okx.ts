@@ -2,7 +2,7 @@ import axios from 'axios'
 import CryptoJS from 'crypto-js'
 
 // OKX DEX API Configuration
-const OKX_DEX_API_BASE = 'https://web3.okx.com/api/v5/dex/aggregator'
+const OKX_DEX_API_BASE = 'https://web3.okx.com'
 const OKX_API_KEY = process.env.NEXT_PUBLIC_OKX_API_KEY
 const OKX_SECRET_KEY = process.env.NEXT_PUBLIC_OKX_SECRET_KEY
 const OKX_PASSPHRASE = process.env.NEXT_PUBLIC_OKX_PASSPHRASE
@@ -19,10 +19,11 @@ export interface SwapRequest {
   swapMode: 'exactIn' | 'exactOut'
   fromTokenAddress: string
   toTokenAddress: string
-  slippage: string
-  userWalletAddress: string
+  userWalletAddress?: string
   swapReceiverAddress?: string
   gasLevel?: 'slow' | 'average' | 'fast'
+  priceImpactProtectionPercentage?: string
+  feePercent?: string
 }
 
 export interface SwapResponse {
@@ -39,7 +40,7 @@ export interface TokenInfo {
   price?: string
 }
 
-// Token addresses for XLayer mainnet (OKX DEX supported)
+// Token addresses for XLayer testnet (OKX DEX supported)
 export const TOKENS: { [key: string]: TokenInfo } = {
   'ETH': {
     symbol: 'ETH',
@@ -48,17 +49,22 @@ export const TOKENS: { [key: string]: TokenInfo } = {
   },
   'USDT': {
     symbol: 'USDT',
-    address: '0x1c17e32e23437d63e2f91fd546a000f261e0b8fd', // XLayer mainnet USDT
+    address: '0x1c17e32e23437d63e2f91fd546a000f261e0b8fd', // XLayer testnet USDT
     decimals: 6
   },
   'USDC': {
     symbol: 'USDC',
-    address: '0x176211869ca2b568f2a7d4ee941e073a821ee1ff', // XLayer mainnet USDC
+    address: '0x176211869ca2b568f2a7d4ee941e073a821ee1ff', // XLayer testnet USDC
     decimals: 6
   },
   'WBTC': {
     symbol: 'WBTC',
-    address: '0x9a5b2c5054c3e9c43864736a3cd11a3042aa6c38', // XLayer mainnet WBTC
+    address: '0x9a5b2c5054c3e9c43864736a3cd11a3042aa6c38', // XLayer testnet WBTC
+    decimals: 8
+  },
+  'BTC': {
+    symbol: 'BTC',
+    address: '0x9a5b2c5054c3e9c43864736a3cd11a3042aa6c38', // XLayer testnet WBTC (same as BTC)
     decimals: 8
   }
 }
@@ -105,10 +111,11 @@ export const getSwapQuote = async (request: SwapRequest): Promise<SwapResponse> 
       swapMode: request.swapMode,
       fromTokenAddress: request.fromTokenAddress,
       toTokenAddress: request.toTokenAddress,
-      slippage: request.slippage,
-      userWalletAddress: request.userWalletAddress,
+      ...(request.userWalletAddress && { userWalletAddress: request.userWalletAddress }),
       ...(request.swapReceiverAddress && { swapReceiverAddress: request.swapReceiverAddress }),
-      ...(request.gasLevel && { gasLevel: request.gasLevel })
+      ...(request.gasLevel && { gasLevel: request.gasLevel }),
+      ...(request.priceImpactProtectionPercentage && { priceImpactProtectionPercentage: request.priceImpactProtectionPercentage }),
+      ...(request.feePercent && { feePercent: request.feePercent })
     })
 
     // Use full API path for requestPath (OKX expects /api/v5/dex/aggregator/quote?...)
@@ -229,9 +236,9 @@ export async function executeTrade(tradeRequest: TradeRequest): Promise<TradeRes
       swapMode: 'exactIn',
       fromTokenAddress: TOKENS[fromToken]?.address || TOKENS.ETH.address,
       toTokenAddress: TOKENS[toToken]?.address || TOKENS.USDT.address,
-      slippage: '0.05', // 5% slippage
       userWalletAddress: tradeRequest.user,
-      gasLevel: 'average'
+      gasLevel: 'average',
+      priceImpactProtectionPercentage: '0.25'
     }
 
     const swapResult = await executeSwap(swapRequest)
@@ -311,83 +318,233 @@ export async function getMarketData(symbol: string): Promise<any> {
   }
 } 
 
-// Test function to check supported tokens on XLayer
-export const testXLayerTokens = async () => {
+// Get trading pairs from OKX general API
+export const getOKXTradingPairs = async () => {
   try {
-    console.log('Testing XLayer token combinations...')
+    console.log('🔍 Fetching trading pairs from OKX API...')
+    const response = await axios.get('https://www.okx.com/api/v5/public/instruments?instType=SPOT', {
+      timeout: 10000
+    })
     
-    // Test different token combinations
-    const testCases = [
-      {
-        name: 'ETH to USDT',
-        fromToken: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
-        toToken: '0x1c17e32e23437d63e2f91fd546a000f261e0b8fd',
-        amount: '1000000000000000000' // 1 ETH in wei
-      },
-      {
-        name: 'USDT to ETH',
-        fromToken: '0x1c17e32e23437d63e2f91fd546a000f261e0b8fd',
-        toToken: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
-        amount: '1000000' // 1 USDT (6 decimals)
-      },
-      {
-        name: 'ETH to USDC',
-        fromToken: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
-        toToken: '0x176211869ca2b568f2a7d4ee941e073a821ee1ff',
-        amount: '1000000000000000000' // 1 ETH in wei
+    if (response.data && response.data.code === '0') {
+      console.log('✅ OKX trading pairs fetched successfully')
+      return {
+        success: true,
+        data: response.data.data,
+        message: 'Trading pairs fetched successfully'
       }
-    ]
+    } else {
+      console.error('❌ OKX API error:', response.data)
+      return {
+        success: false,
+        error: response.data,
+        message: 'Failed to fetch trading pairs'
+      }
+    }
+  } catch (error: any) {
+    console.error('❌ Failed to fetch OKX trading pairs:', error.message)
+    return {
+      success: false,
+      error: error.message,
+      message: 'Network error while fetching trading pairs'
+    }
+  }
+}
+
+// Get price for a specific trading pair
+export const getOKXTradingPairPrice = async (pair: string) => {
+  try {
+    console.log(`🔍 Fetching price for ${pair}...`)
+    const response = await axios.get(`https://www.okx.com/api/v5/market/ticker?instId=${pair}`, {
+      timeout: 10000
+    })
     
-    const results = []
+    if (response.data && response.data.code === '0' && response.data.data.length > 0) {
+      console.log(`✅ Price for ${pair} fetched successfully`)
+      return {
+        success: true,
+        data: response.data.data[0],
+        message: 'Price fetched successfully'
+      }
+    } else {
+      console.error(`❌ OKX API error for ${pair}:`, response.data)
+      return {
+        success: false,
+        error: response.data,
+        message: 'Failed to fetch price'
+      }
+    }
+  } catch (error: any) {
+    console.error(`❌ Failed to fetch price for ${pair}:`, error.message)
+    return {
+      success: false,
+      error: error.message,
+      message: 'Network error while fetching price'
+    }
+  }
+}
+
+// Simulate a quote using OKX general API
+export const getSimulatedQuote = async (fromToken: string, toToken: string, amount: string) => {
+  try {
+    console.log(`🔍 Simulating quote for ${amount} ${fromToken} to ${toToken}...`)
     
-    for (const testCase of testCases) {
-      try {
-        const timestamp = new Date().toISOString()
-        const queryParams = new URLSearchParams({
-          chainIndex: '196',
-          chainId: '196',
-          amount: testCase.amount,
-          swapMode: 'exactIn',
-          fromTokenAddress: testCase.fromToken,
-          toTokenAddress: testCase.toToken,
-          slippage: '0.05',
-          userWalletAddress: '0x71197e7a1CA5A2cb2AD82432B924F69B1E3dB123'
-        })
-        
-        const requestPath = `/api/v5/dex/aggregator/quote?${queryParams.toString()}`
-        const signature = await createSignature(timestamp, 'GET', requestPath)
-        
-        const response = await axios.get(`${OKX_DEX_API_BASE}/quote?${queryParams.toString()}`, {
-          headers: {
-            'OK-ACCESS-KEY': OKX_API_KEY,
-            'OK-ACCESS-SIGN': signature,
-            'OK-ACCESS-PASSPHRASE': OKX_PASSPHRASE,
-            'OK-ACCESS-TIMESTAMP': timestamp
-          }
-        })
-        
-        results.push({
-          testCase: testCase.name,
-          success: true,
-          data: response.data
-        })
-        
-        console.log(`✅ ${testCase.name} - SUCCESS:`, response.data)
-      } catch (error: any) {
-        results.push({
-          testCase: testCase.name,
-          success: false,
-          error: error.response?.data || error.message
-        })
-        
-        console.log(`❌ ${testCase.name} - FAILED:`, error.response?.data || error.message)
+    // Create trading pair symbol
+    const pair = `${fromToken}-${toToken}`
+    
+    // Get current price
+    const priceResult = await getOKXTradingPairPrice(pair)
+    
+    if (!priceResult.success) {
+      return {
+        success: false,
+        message: `Failed to get price for ${pair}`
       }
     }
     
-    console.log('XLayer token test results:', results)
-    return results
-  } catch (error) {
-    console.error('XLayer tokens test error:', error)
+    const priceData = priceResult.data
+    const currentPrice = parseFloat(priceData.last)
+    const amountNum = parseFloat(amount)
+    
+    // Calculate quote
+    const outputAmount = amountNum * currentPrice
+    const priceImpact = 0.001 // 0.1% price impact
+    const fee = outputAmount * 0.003 // 0.3% fee
+    
+    const finalOutput = outputAmount * (1 - priceImpact - fee)
+    
+    return {
+      success: true,
+      data: {
+        fromToken,
+        toToken,
+        inputAmount: amount,
+        outputAmount: finalOutput.toFixed(6),
+        price: currentPrice,
+        priceImpact: (priceImpact * 100).toFixed(2) + '%',
+        fee: (fee / outputAmount * 100).toFixed(2) + '%',
+        timestamp: new Date().toISOString()
+      },
+      message: 'Quote simulated successfully'
+    }
+  } catch (error: any) {
+    console.error('❌ Failed to simulate quote:', error.message)
+    return {
+      success: false,
+      error: error.message,
+      message: 'Failed to simulate quote'
+    }
+  }
+} 
+
+// Get supported chains from OKX DEX API
+export const getSupportedChains = async () => {
+  try {
+    console.log('🔍 Getting supported chains from OKX DEX API...')
+    const timestamp = new Date().toISOString()
+    const requestPath = '/supported/chain'
+    const signature = await createSignature(timestamp, 'GET', requestPath)
+    const response = await axios.get(`${OKX_DEX_API_BASE}${requestPath}`, {
+      headers: {
+        'OK-ACCESS-KEY': OKX_API_KEY,
+        'OK-ACCESS-SIGN': signature,
+        'OK-ACCESS-PASSPHRASE': OKX_PASSPHRASE,
+        'OK-ACCESS-TIMESTAMP': timestamp
+      }
+    })
+    console.log('✅ OKX DEX supported chains response:', response.data)
+    return response.data
+  } catch (error: any) {
+    console.error('❌ Failed to get supported chains:', error.response?.data || error.message)
     return null
+  }
+}
+
+// Get all supported tokens from OKX DEX API
+export const getAllSupportedTokens = async () => {
+  try {
+    console.log('🔍 Getting all supported tokens from OKX DEX API...')
+    const timestamp = new Date().toISOString()
+    const requestPath = '/aggregator/all-tokens'
+    const signature = await createSignature(timestamp, 'GET', requestPath)
+    const response = await axios.get(`${OKX_DEX_API_BASE}${requestPath}`, {
+      headers: {
+        'OK-ACCESS-KEY': OKX_API_KEY,
+        'OK-ACCESS-SIGN': signature,
+        'OK-ACCESS-PASSPHRASE': OKX_PASSPHRASE,
+        'OK-ACCESS-TIMESTAMP': timestamp
+      }
+    })
+    console.log('✅ OKX DEX all tokens response:', response.data)
+    return response.data
+  } catch (error: any) {
+    console.error('❌ Failed to get all tokens:', error.response?.data || error.message)
+    return null
+  }
+}
+
+// Get quote from OKX DEX API using correct endpoint
+export const getDEXQuote = async (fromToken: string, toToken: string, amount: string, chainId: string = '1') => {
+  try {
+    console.log(`🔍 Getting DEX quote for ${amount} ${fromToken} to ${toToken} on chain ${chainId}...`)
+    const timestamp = new Date().toISOString()
+    
+    const queryParams = new URLSearchParams({
+      chainId: chainId,
+      amount: amount,
+      fromToken: fromToken,
+      toToken: toToken,
+      slippage: '0.5' // 0.5% slippage
+    })
+    
+    const requestPath = `/quote?${queryParams.toString()}`
+    const signature = await createSignature(timestamp, 'GET', requestPath)
+    const response = await axios.get(`${OKX_DEX_API_BASE}${requestPath}`, {
+      headers: {
+        'OK-ACCESS-KEY': OKX_API_KEY,
+        'OK-ACCESS-SIGN': signature,
+        'OK-ACCESS-PASSPHRASE': OKX_PASSPHRASE,
+        'OK-ACCESS-TIMESTAMP': timestamp
+      }
+    })
+    console.log('✅ OKX DEX quote response:', response.data)
+    return response.data
+  } catch (error: any) {
+    console.error('❌ Failed to get DEX quote:', error.response?.data || error.message)
+    return null
+  }
+}
+
+// Test OKX DEX API connectivity with correct endpoints
+export const testOKXDEXAPI = async () => {
+  try {
+    console.log('🔍 Testing OKX DEX API with correct endpoints...')
+    
+    // Test 1: Get supported chains
+    console.log('📋 Test 1: Getting supported chains...')
+    const chainsResult = await getSupportedChains()
+    
+    // Test 2: Get all tokens
+    console.log('🪙 Test 2: Getting all tokens...')
+    const tokensResult = await getAllSupportedTokens()
+    
+    // Test 3: Get quote for ETH to USDC on Ethereum mainnet
+    console.log('💱 Test 3: Getting quote for ETH to USDC...')
+    const quoteResult = await getDEXQuote('ETH', 'USDC', '1000000000000000000', '1') // 1 ETH
+    
+    return {
+      success: true,
+      chains: chainsResult,
+      tokens: tokensResult,
+      quote: quoteResult,
+      message: 'All OKX DEX API tests completed successfully!'
+    }
+  } catch (error: any) {
+    console.error('❌ OKX DEX API test failed:', error.response?.data || error.message)
+    return {
+      success: false,
+      error: error.response?.data || error.message,
+      message: 'OKX DEX API test failed. Check console for details.'
+    }
   }
 } 

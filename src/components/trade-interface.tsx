@@ -2,447 +2,841 @@
 
 import { useState, useEffect } from 'react'
 import { useAccount } from 'wagmi'
-import { AlertCircle, TrendingUp, TrendingDown, DollarSign, Clock, Zap } from 'lucide-react'
-import { TOKENS, getSwapQuote, SwapRequest, testXLayerTokens } from '@/api/okx'
+import { 
+  getQuote, 
+  executeSwap, 
+  testCompleteOKXDEXSDK,
+  getSDKClientInfo
+} from '@/api/okx-dex-sdk'
 
-interface TradeInterfaceProps {
-  session: any
+
+interface TradeResult {
+  success: boolean
+  message: string
+  data?: any
 }
 
-export function TradeInterface({ session }: TradeInterfaceProps) {
-  const [mounted, setMounted] = useState(false)
-  const { isConnected } = useAccount()
-  const [symbol, setSymbol] = useState('BTC-USDT')
-  const [side, setSide] = useState<'buy' | 'sell'>('buy')
-  const [amount, setAmount] = useState('')
-  const [isExecuting, setIsExecuting] = useState(false)
-  const [tradeResult, setTradeResult] = useState<any>(null)
+interface TradingPair {
+  instId: string
+  baseCcy: string
+  quoteCcy: string
+  last: string
+  lastSz: string
+  askPx: string
+  askSz: string
+  bidPx: string
+  bidSz: string
+  open24h: string
+  high24h: string
+  low24h: string
+  volCcy24h: string
+  vol24h: string
+  ts: string
+  sodUtc0: string
+  sodUtc8: string
+}
 
+interface MarketData {
+  instId: string
+  last: string
+  lastSz: string
+  askPx: string
+  askSz: string
+  bidPx: string
+  bidSz: string
+  open24h: string
+  high24h: string
+  low24h: string
+  volCcy24h: string
+  vol24h: string
+  ts: string
+}
+
+export default function TradeInterface() {
+  const { address, isConnected } = useAccount()
+  const [amount, setAmount] = useState('')
+  const [symbol, setSymbol] = useState('BTC-USDT')
+  const [tradeResult, setTradeResult] = useState<TradeResult | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [selectedChain, setSelectedChain] = useState('195') // XLayer testnet
+  const [sdkInfo, setSdkInfo] = useState<any>(null)
+
+
+  // Fetch SDK info on component mount
   useEffect(() => {
-    setMounted(true)
+    fetchSDKInfo()
   }, [])
 
-  if (!mounted) {
-    return (
-      <div className="text-center py-12">
-        <div className="w-20 h-20 bg-gray-700/50 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
-          <div className="w-10 h-10 bg-gray-600 rounded"></div>
-        </div>
-        <div className="space-y-3">
-          <div className="h-6 bg-gray-600 rounded w-48 mx-auto"></div>
-          <div className="h-4 bg-gray-600 rounded w-64 mx-auto"></div>
-        </div>
-      </div>
-    )
-  }
-
-  const getRemainingBudget = () => {
-    if (!session) return 0
-    return session.spendLimit - session.spent
+  const fetchSDKInfo = async () => {
+    try {
+      setLoading(true)
+      console.log('🔍 Fetching OKX DEX SDK info...')
+      
+      const result = await getSDKClientInfo()
+      if (result.success) {
+        setSdkInfo(result.data)
+        console.log('✅ SDK info loaded:', result.data)
+      }
+    } catch (error) {
+      console.error('Error fetching SDK info:', error)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleExecuteTrade = async () => {
-    if (!amount || !session) return
-    
-    // Validate amount
-    const amountValue = parseFloat(amount)
-    if (isNaN(amountValue) || amountValue <= 0) {
-      setTradeResult({
-        success: false,
-        message: 'Please enter a valid amount'
-      })
+    if (!symbol || !amount || !selectedChain) {
+      alert('Please fill in all fields')
       return
     }
-    
-    // Check if amount exceeds remaining budget
-    const remainingBudget = getRemainingBudget()
-    if (amountValue > remainingBudget) {
-      setTradeResult({
-        success: false,
-        message: `Amount exceeds remaining budget. You have $${remainingBudget.toFixed(2)} available.`
-      })
-      return
-    }
-    
-    setIsExecuting(true)
-    setTradeResult(null)
-    
+
+    setLoading(true)
     try {
-      // Convert symbol to token addresses
-      const [baseToken, quoteToken] = symbol.split('-')
-      const fromToken = side === 'buy' ? quoteToken : baseToken
-      const toToken = side === 'buy' ? baseToken : quoteToken
-      
-      // Debug: Log token conversion
-      console.log('Token conversion:', {
-        symbol,
-        baseToken,
-        quoteToken,
-        side,
-        fromToken,
-        toToken,
-        fromTokenAddress: TOKENS[fromToken]?.address,
-        toTokenAddress: TOKENS[toToken]?.address,
-        chainIndex: '196' // XLayer
+      const fromTokenAddress = getTokenAddress(symbol.split('-')[0])
+      const toTokenAddress = getTokenAddress(symbol.split('-')[1])
+      const amountInWei = convertToWei(amount, symbol.split('-')[0])
+
+      console.log('🔍 Trade Parameters:', {
+        chainIndex: selectedChain,
+        fromTokenAddress,
+        toTokenAddress,
+        amount: amountInWei
       })
-      
-      // Create swap request
-      const swapRequest: SwapRequest = {
-        chainIndex: '196', // XLayer mainnet (OKX DEX supported)
-        amount: (parseFloat(amount) * Math.pow(10, TOKENS[fromToken]?.decimals || 18)).toString(),
-        swapMode: 'exactIn',
-        fromTokenAddress: TOKENS[fromToken]?.address || TOKENS.ETH.address,
-        toTokenAddress: TOKENS[toToken]?.address || TOKENS.USDT.address,
-        slippage: '0.05', // 5% slippage
-        userWalletAddress: session.user || '0x0000000000000000000000000000000000000000',
-        gasLevel: 'average'
+
+
+
+
+      const result = await getQuote({
+        chainIndex: selectedChain,
+        fromTokenAddress,
+        toTokenAddress,
+        amount: amountInWei,
+        slippage: '0.5'
+      })
+
+      if (result.success) {
+        console.log('✅ Quote received:', result.data)
+        setTradeResult(result)
+      } else {
+        console.error('❌ Quote failed:', result.error)
+        setTradeResult(result)
       }
 
-      console.log('Swap request:', swapRequest)
+      if (result.data && result.data.data && result.data.data[0]) {
+        console.log('🔍 Quote Data Structure:')
+        const quoteData = result.data.data[0] as any
+        console.log('- Chain ID:', quoteData.chainId)
+        console.log('- Chain Index:', quoteData.chainIndex)
+        console.log('- All available fields:', Object.keys(quoteData))
+        
+        // Check for price-related fields
+        console.log('💰 Price-related fields:')
+        console.log('- price:', quoteData.price)
+        console.log('- estimatedOutput:', quoteData.estimatedOutput)
+        console.log('- outputAmount:', quoteData.outputAmount)
+        console.log('- toAmount:', quoteData.toAmount)
+        console.log('- rate:', quoteData.rate)
+        console.log('- exchangeRate:', quoteData.exchangeRate)
+        console.log('- All fields with values:', Object.entries(quoteData).filter(([key, value]) => value !== undefined && value !== null))
+      }
 
-      // Get quote first
-      const quote = await getSwapQuote(swapRequest)
+      setTradeResult(result)
+    } catch (error) {
+      console.error('Trade execution failed:', error)
+      setTradeResult({
+        success: false,
+        message: 'Failed to execute trade'
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleTestSDK = async () => {
+    try {
+      setLoading(true)
+      setTradeResult({
+        success: false,
+        message: 'Testing OKX DEX SDK...'
+      })
+
+      const result = await testCompleteOKXDEXSDK()
       
-      if (quote.success) {
+      if (result && result.success) {
         setTradeResult({
           success: true,
-          message: `Quote received: ${quote.routerResult?.toTokenAmount || '0'} ${toToken} for ${amount} ${fromToken}`,
-          quote: quote
+          message: 'OKX DEX SDK test successful!',
+          data: result
         })
       } else {
         setTradeResult({
           success: false,
-          message: quote.message || 'Failed to get quote'
+          message: result?.message || 'OKX DEX SDK test failed'
         })
       }
-    } catch (error) {
-      console.error('Trade execution error:', error)
+    } catch (error: any) {
+      console.error('SDK test error:', error)
       setTradeResult({
         success: false,
-        message: error instanceof Error ? error.message : 'Trade execution failed'
+        message: error.message || 'Failed to test SDK'
       })
     } finally {
-      setIsExecuting(false)
+      setLoading(false)
     }
   }
 
-  const handleTestXLayerTokens = async () => {
-    try {
-      console.log('Testing XLayer tokens...')
-      const result = await testXLayerTokens()
-      console.log('XLayer tokens test result:', result)
-      
-      setTradeResult({
-        success: true,
-        message: `XLayer tokens test completed. Check console for details.`
-      })
-    } catch (error) {
-      console.error('XLayer tokens test error:', error)
-      setTradeResult({
-        success: false,
-        message: 'Failed to test XLayer tokens'
-      })
+  const handleRefreshSDKInfo = async () => {
+    await fetchSDKInfo()
+  }
+
+  // Helper functions
+  const getTokenAddress = (token: string): string => {
+    // Token addresses for different blockchains
+    const addresses: { [key: string]: { [chainId: string]: string } } = {
+      'ETH': {
+        '1': '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', // Ethereum
+        '137': '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', // Polygon (MATIC native)
+        '56': '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', // BSC (WETH)
+        '42161': '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // Arbitrum (WETH)
+        '10': '0x4200000000000000000000000000000000000006', // Optimism (WETH)
+        '196': '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'  // XLayer Mainnet (OKB)
+      },
+      'USDC': {
+        '1': '0xA0b86a33E6441b8c4C8C8C8C8C8C8C8C8C8C8C8', // Ethereum
+        '137': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', // Polygon
+        '56': '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', // BSC
+        '42161': '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', // Arbitrum
+        '10': '0x7F5c764cBc14f9669B88837ca1490cCa17c31607', // Optimism
+        '195': '0x176211869cA2b568f2A7D4EE941E073a821EE1ff'  // XLayer Testnet
+      },
+      'USDT': {
+        '1': '0xdAC17F958D2ee523a2206206994597C13D831ec7', // Ethereum
+        '137': '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', // Polygon
+        '56': '0x55d398326f99059fF775485246999027B3197955', // BSC
+        '42161': '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', // Arbitrum
+        '10': '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', // Optimism
+        '195': '0x9e5AAC1Ba1a2e6aEd6b32689DFcF62A509Ca96f3'  // XLayer Testnet
+      },
+      'BTC': {
+        '1': '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', // Ethereum (WBTC)
+        '137': '0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6', // Polygon (WBTC)
+        '56': '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c', // BSC (BTCB)
+        '42161': '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f', // Arbitrum (WBTC)
+        '10': '0x68f180fcCe6836688e9084f035309E29Bf0A2095', // Optimism (WBTC)
+        '196': '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599'  // XLayer Mainnet (WBTC)
+      },
+      'WBTC': {
+        '1': '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', // Ethereum
+        '137': '0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6', // Polygon
+        '56': '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c', // BSC
+        '42161': '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f', // Arbitrum
+        '10': '0x68f180fcCe6836688e9084f035309E29Bf0A2095', // Optimism
+        '196': '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599'  // XLayer Mainnet
+      },
+      'OKB': {
+        '195': '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'  // XLayer Testnet (Native)
+      },
+      'MATIC': {
+        '137': '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' // Polygon (Native)
+      },
+      'BNB': {
+        '56': '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' // BSC (Native)
+      }
+    }
+    
+    // Get the token addresses for the selected chain
+    const tokenAddresses = addresses[token]
+    if (!tokenAddresses) {
+      // Fallback to ETH address for unknown tokens
+      return '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+    }
+    
+    // Return the address for the selected chain, or fallback to Ethereum
+    return tokenAddresses[selectedChain] || tokenAddresses['1'] || '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+  }
+
+  const convertToWei = (amount: string, token: string): string => {
+    const decimals: { [key: string]: number } = {
+      'ETH': 18,
+      'USDC': 6,
+      'USDT': 6,
+      'BTC': 8,
+      'WBTC': 8
+    }
+    const decimal = decimals[token] || 18
+    return (parseFloat(amount) * Math.pow(10, decimal)).toString()
+  }
+
+  const formatPrice = (price: string) => {
+    const num = parseFloat(price)
+    if (isNaN(num)) return '0.00'
+    if (num >= 1) {
+      return num.toFixed(2)
+    } else if (num >= 0.01) {
+      return num.toFixed(4)
+    } else {
+      return num.toFixed(8)
     }
   }
 
-  if (!isConnected) {
-    return (
-      <div className="text-center py-12">
-        <div className="w-20 h-20 bg-gray-700/50 rounded-full flex items-center justify-center mx-auto mb-6">
-          <AlertCircle className="h-10 w-10 text-gray-400" />
-        </div>
-        <h3 className="text-xl font-semibold text-white mb-3">Wallet Not Connected</h3>
-        <p className="text-gray-400 text-sm mb-6">Connect your wallet to start trading on OKX DEX</p>
-        <div className="bg-blue-900/20 border border-blue-700/30 rounded-xl p-6 max-w-md mx-auto">
-          <div className="flex items-center space-x-2 mb-4">
-            <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
-            <span className="text-blue-400 text-sm font-medium">Trading Features</span>
-          </div>
-          <ul className="text-sm text-gray-300 space-y-2">
-            <li className="flex items-center space-x-2">
-              <div className="w-1.5 h-1.5 bg-blue-400 rounded-full"></div>
-              <span>Real-time market data</span>
-            </li>
-            <li className="flex items-center space-x-2">
-              <div className="w-1.5 h-1.5 bg-blue-400 rounded-full"></div>
-              <span>Secure order execution</span>
-            </li>
-            <li className="flex items-center space-x-2">
-              <div className="w-1.5 h-1.5 bg-blue-400 rounded-full"></div>
-              <span>Low gas fees on XLayer</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    )
+  const formatVolume = (volume: string) => {
+    const num = parseFloat(volume)
+    if (isNaN(num)) return '0'
+    if (num >= 1000000) {
+      return `${(num / 1000000).toFixed(2)}M`
+    } else if (num >= 1000) {
+      return `${(num / 1000).toFixed(2)}K`
+    } else {
+      return num.toFixed(2)
+    }
   }
 
-  // Check if session is active
-  const isSessionActive = session && Date.now() < session.expiry
+  const getChainName = (chainId: string) => {
+    const chains: { [key: string]: string } = {
+      '1': 'Ethereum',
+      '137': 'Polygon',
+      '56': 'BSC',
+      '42161': 'Arbitrum',
+      '10': 'Optimism',
+      '195': 'XLayer Testnet',
+      '196': 'XLayer Mainnet'
+    }
+    return chains[chainId] || `Chain ${chainId}`
+  }
 
-  // Debug: Log session info
-  console.log('TradeInterface - Session:', session)
-  console.log('TradeInterface - isSessionActive:', isSessionActive)
-  console.log('TradeInterface - Current time:', Date.now())
-  console.log('TradeInterface - Session expiry:', session?.expiry)
-  console.log('TradeInterface - Session user:', session?.user)
-  console.log('TradeInterface - Session spendLimit:', session?.spendLimit)
-  console.log('TradeInterface - Session spent:', session?.spent)
+  // Calculate token price based on trading pair
+  const calculateTokenPrice = (fromToken: string, toToken: string, amount: string, estimatedOutput?: string) => {
+    if (!estimatedOutput || !amount) return null
+    
+    const fromAmount = parseFloat(amount)
+    const toAmount = parseFloat(estimatedOutput)
+    
+    if (fromAmount === 0) return null
+    
+    // Calculate price: how much quote token for 1 base token
+    const price = toAmount / fromAmount
+    
+    return {
+      price,
+      formattedPrice: price.toFixed(6),
+      unit: `${fromToken}/${toToken}`,
+      description: `1 ${fromToken} = ${price.toFixed(6)} ${toToken}`
+    }
+  }
 
-  if (!isSessionActive) {
-    return (
-      <div className="text-center py-12">
-        <div className="w-20 h-20 bg-gray-700/50 rounded-full flex items-center justify-center mx-auto mb-6">
-          <AlertCircle className="h-10 w-10 text-gray-400" />
-        </div>
-        <h3 className="text-xl font-semibold text-white mb-3">
-          {!session ? 'No Active Session' : 'Session Expired'}
-        </h3>
-        <p className="text-gray-400 text-sm mb-6">
-          {!session ? 'Create a trading session first to start trading' : 'Your trading session has expired'}
-        </p>
-        <div className="bg-orange-900/20 border border-orange-700/30 rounded-xl p-6 max-w-md mx-auto">
-          <div className="flex items-center space-x-2 mb-4">
-            <div className="w-2 h-2 bg-orange-400 rounded-full"></div>
-            <span className="text-orange-400 text-sm font-medium">Next Steps</span>
-          </div>
-          <p className="text-sm text-gray-300">
-            {!session 
-              ? 'Go to the Session panel and create a new trading session with your desired limits.'
-              : 'Create a new session to continue trading with updated limits.'
-            }
-          </p>
-        </div>
-      </div>
-    )
+  // Get token symbol for display
+  const getTokenSymbol = (token: string) => {
+    const symbols: { [key: string]: string } = {
+      '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee': 'ETH',
+      '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'USDC',
+      '0xdac17f958d2ee523a2206206994597c13d831ec7': 'USDT',
+      '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599': 'BTC'
+    }
+    return symbols[token] || token
   }
 
   return (
-    <div className="space-y-6">
-      {/* Trading Status */}
-      <div className="bg-gradient-to-r from-blue-900/20 to-indigo-900/20 border border-blue-700/30 rounded-xl p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
-              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-            </div>
-            <div>
-              <h4 className="font-semibold text-blue-400">Trading Enabled</h4>
-              <p className="text-blue-300 text-sm">Session active and ready</p>
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-sm text-blue-400">Remaining Budget</div>
-            <div className="font-bold text-blue-300 text-lg">${getRemainingBudget().toFixed(2)}</div>
-          </div>
-        </div>
-        
-        {/* Session Details */}
-        <div className="grid grid-cols-3 gap-4 text-sm">
-          <div className="bg-blue-900/20 rounded-lg p-3">
-            <div className="text-blue-300 mb-1">Total Limit</div>
-            <div className="text-white font-semibold">${session.spendLimit.toFixed(2)}</div>
-          </div>
-          <div className="bg-blue-900/20 rounded-lg p-3">
-            <div className="text-blue-300 mb-1">Amount Used</div>
-            <div className="text-white font-semibold">${session.spent.toFixed(2)}</div>
-          </div>
-          <div className="bg-blue-900/20 rounded-lg p-3">
-            <div className="text-blue-300 mb-1">Time Left</div>
-            <div className="text-white font-semibold">
-              {Math.max(0, Math.floor((session.expiry - Date.now()) / (1000 * 60 * 60)))}h {Math.max(0, Math.floor(((session.expiry - Date.now()) % (1000 * 60 * 60)) / (1000 * 60)))}m
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Trading Form */}
-      <div className="bg-gray-700/50 rounded-xl p-6">
-        <h4 className="font-semibold text-white mb-4">Place Order</h4>
-        <div className="grid md:grid-cols-3 gap-4">
-          {/* Trading Pair */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Trading Pair
-            </label>
-            <select
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-600 rounded-lg bg-gray-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    <div className="max-w-7xl mx-auto p-6">
+      <div className="bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-700">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-white">OKX DEX Trading Interface</h2>
+          <div className="flex space-x-2">
+            <button
+              onClick={handleRefreshSDKInfo}
+              disabled={loading}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
             >
-              <option value="WBTC-USDT">WBTC/USDT</option>
-              <option value="ETH-USDT">ETH/USDT</option>
-              <option value="ETH-USDC">ETH/USDC</option>
-              <option value="USDC-USDT">USDC/USDT</option>
-            </select>
-          </div>
-
-          {/* Buy/Sell Side */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Order Side
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setSide('buy')}
-                className={`py-3 px-4 rounded-lg border text-sm font-medium transition-all duration-200 ${
-                  side === 'buy'
-                    ? 'bg-green-900/20 border-green-500 text-green-400 shadow-lg'
-                    : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-500 hover:bg-gray-600'
-                }`}
-              >
-                <div className="flex items-center justify-center space-x-2">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span>Buy</span>
-                </div>
-              </button>
-              <button
-                onClick={() => setSide('sell')}
-                className={`py-3 px-4 rounded-lg border text-sm font-medium transition-all duration-200 ${
-                  side === 'sell'
-                    ? 'bg-red-900/20 border-red-500 text-red-400 shadow-lg'
-                    : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-500 hover:bg-gray-600'
-                }`}
-              >
-                <div className="flex items-center justify-center space-x-2">
-                  <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                  <span>Sell</span>
-                </div>
-              </button>
-            </div>
-          </div>
-
-          {/* Amount */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Amount (USD)
-            </label>
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-600 rounded-lg bg-gray-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="100"
-              min="0"
-              max={getRemainingBudget()}
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Max: ${getRemainingBudget().toFixed(2)}
-            </p>
+              🔄 Refresh SDK Info
+            </button>
+            <button
+              onClick={handleTestSDK}
+              disabled={loading}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors disabled:opacity-50"
+            >
+              🧪 Test SDK
+            </button>
           </div>
         </div>
 
-        {/* Execute Button */}
-        <button
-          onClick={handleExecuteTrade}
-          disabled={isExecuting || !amount || parseFloat(amount) > getRemainingBudget()}
-          className="w-full mt-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold py-3 px-6 rounded-lg hover:from-green-700 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none text-sm"
-        >
-          {isExecuting ? (
-            <div className="flex items-center justify-center space-x-2">
-              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              <span>Getting Quote...</span>
+        {/* SDK Info */}
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold mb-4 text-gray-300">OKX DEX SDK Information</h3>
+          {loading ? (
+            <div className="text-center py-4">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="mt-2 text-gray-400">Loading SDK info...</p>
             </div>
-          ) : (
-            <div className="flex items-center justify-center space-x-2">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-              <span>Get Quote for {side === 'buy' ? 'Buy' : 'Sell'} {symbol}</span>
-            </div>
-          )}
-        </button>
-
-        {/* Test Button */}
-        <div className="mt-4">
-          <button
-            onClick={handleTestXLayerTokens}
-            className="w-full px-4 py-3 bg-yellow-600 hover:bg-yellow-700 text-white font-medium rounded-lg transition-colors"
-          >
-            Test XLayer Token Support
-          </button>
-        </div>
-      </div>
-
-      {/* Trade Result */}
-      {tradeResult && (
-        <div className="bg-gray-700/50 rounded-xl p-6 mt-6">
-          <div className="flex items-center space-x-3 mb-4">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-              tradeResult.success ? 'bg-green-500/20' : 'bg-red-500/20'
-            }`}>
-              {tradeResult.success ? (
-                <TrendingUp className="w-5 h-5 text-green-400" />
-              ) : (
-                <AlertCircle className="w-5 h-5 text-red-400" />
-              )}
-            </div>
-            <div>
-              <h4 className={`font-semibold ${
-                tradeResult.success ? 'text-green-400' : 'text-red-400'
-              }`}>
-                {tradeResult.success ? 'Quote Received' : 'Quote Failed'}
-              </h4>
-              <p className="text-sm text-gray-400">
-                {tradeResult.message}
-              </p>
-            </div>
-          </div>
-          
-          {tradeResult.success && tradeResult.quote && (
-            <div className="mt-4 p-4 bg-gray-800/50 rounded-lg">
-              <h5 className="text-sm font-medium text-white mb-3">Quote Details</h5>
-              <div className="grid grid-cols-2 gap-4 text-sm">
+          ) : sdkInfo ? (
+            <div className="bg-gray-700/50 rounded-lg p-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <span className="text-gray-400">Price Impact:</span>
-                  <span className="text-white ml-2">
-                    {tradeResult.quote.routerResult?.priceImpactPercentage || '0'}%
-                  </span>
+                  <h4 className="font-semibold text-white mb-2">Client Structure</h4>
+                  <div className="space-y-1 text-sm">
+                    <div className="text-gray-300">Client Type: <span className="text-blue-400">{sdkInfo.clientType}</span></div>
+                    <div className="text-gray-300">Has DEX: <span className="text-green-400">{sdkInfo.hasDex ? 'Yes' : 'No'}</span></div>
+                    <div className="text-gray-300">DEX Type: <span className="text-purple-400">{sdkInfo.dexType}</span></div>
+                  </div>
                 </div>
                 <div>
-                  <span className="text-gray-400">Trade Fee:</span>
-                  <span className="text-white ml-2">
-                    ${tradeResult.quote.routerResult?.tradeFee || '0'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-400">Gas Estimate:</span>
-                  <span className="text-white ml-2">
-                    {tradeResult.quote.routerResult?.estimateGasFee || '0'} wei
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-400">DEX Route:</span>
-                  <span className="text-white ml-2">
-                    {tradeResult.quote.routerResult?.dexRouterList?.[0]?.subRouterList?.[0]?.dexProtocol?.[0]?.dexName || 'Unknown'}
-                  </span>
+                  <h4 className="font-semibold text-white mb-2">Available Methods</h4>
+                  <div className="text-sm text-gray-300">
+                    {sdkInfo.dexMethods ? (
+                      <div className="space-y-1">
+                        {sdkInfo.dexMethods.slice(0, 5).map((method: string, index: number) => (
+                          <div key={index} className="text-green-400">• {method}</div>
+                        ))}
+                        {sdkInfo.dexMethods.length > 5 && (
+                          <div className="text-gray-500">... and {sdkInfo.dexMethods.length - 5} more</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-red-400">No methods available</div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
+          ) : (
+            <div className="text-center py-4 text-gray-400">
+              No SDK info available. Click "Refresh SDK Info" to load.
+            </div>
           )}
         </div>
-      )}
 
-      {/* Trading Info */}
-      <div className="bg-gray-700/50 rounded-xl p-4">
-        <div className="flex items-center space-x-2 mb-3">
-          <DollarSign className="h-5 w-5 text-gray-400" />
-          <span className="font-semibold text-white">Platform Information</span>
+        {/* Chain Selection */}
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold mb-4 text-gray-300">Select Blockchain</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { id: '195', name: 'XLayer Testnet', currency: 'OKB', featured: true },
+              { id: '1', name: 'Ethereum', currency: 'ETH' },
+              { id: '137', name: 'Polygon', currency: 'MATIC' },
+              { id: '56', name: 'BSC', currency: 'BNB' },
+              { id: '42161', name: 'Arbitrum', currency: 'ETH' },
+              { id: '10', name: 'Optimism', currency: 'ETH' }
+            ].map((chain) => (
+              <button
+                key={chain.id}
+                onClick={() => setSelectedChain(chain.id)}
+                className={`p-3 border rounded-lg transition-all ${
+                  selectedChain === chain.id
+                    ? chain.featured 
+                      ? 'border-green-500 bg-green-900/20 text-green-400'
+                      : 'border-blue-500 bg-blue-900/20 text-blue-400'
+                    : chain.featured
+                      ? 'border-green-600 bg-green-900/10 text-green-300 hover:border-green-500'
+                      : 'border-gray-600 bg-gray-700 text-gray-300 hover:border-gray-500'
+                }`}
+              >
+                <div className="font-semibold">{chain.name}</div>
+                <div className="text-xs opacity-75">{chain.currency}</div>
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-300">
-          <div className="flex justify-between">
-            <span>Platform:</span>
-            <span className="font-medium">OKX DEX</span>
+
+        {/* Trade Form */}
+        <div className="border-t border-gray-700 pt-6">
+          <h3 className="text-lg font-semibold mb-4 text-gray-300">Execute Trade</h3>
+          
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Trading Pair
+                </label>
+                <input
+                  type="text"
+                  value={symbol}
+                  onChange={(e) => setSymbol(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-700 text-white"
+                  placeholder="e.g., BTC-USDT"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Amount
+                </label>
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-700 text-white"
+                  placeholder="Enter amount"
+                  step="0.000001"
+                  min="0"
+                />
+              </div>
+            </div>
+
+            <div className="flex space-x-4">
+              <button
+                onClick={handleExecuteTrade}
+                disabled={!isConnected || loading}
+                className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${
+                  !isConnected || loading
+                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`}
+              >
+                {loading ? 'Processing...' : 'Get Quote'}
+              </button>
+
+            </div>
           </div>
-          <div className="flex justify-between">
-            <span>Network:</span>
-            <span className="font-medium">XLayer (L2)</span>
+        </div>
+
+
+
+        {/* Trade Result */}
+        {tradeResult && (
+          <div className={`mt-6 p-4 rounded-lg ${
+            tradeResult.success 
+              ? 'bg-green-900/20 border border-green-700' 
+              : 'bg-red-900/20 border border-red-700'
+          }`}>
+            <h4 className={`font-semibold mb-2 ${
+              tradeResult.success ? 'text-green-400' : 'text-red-400'
+            }`}>
+              {tradeResult.success ? 'Quote Received!' : 'Error'}
+            </h4>
+            <p className={`${
+              tradeResult.success ? 'text-green-300' : 'text-red-300'
+            }`}>
+              {tradeResult.message}
+            </p>
+            
+            {tradeResult.data && tradeResult.success && (
+              <div className="mt-4 space-y-4">
+                {/* Check if it's a quote result or SDK test result */}
+                {tradeResult.data.code === '0' && tradeResult.data.data ? (
+                  // Quote Result Display
+                  <>
+                    {/* Quote Summary */}
+                    <div className="bg-gray-900/50 rounded-lg p-4">
+                      <h5 className="font-semibold text-white mb-3">Quote Summary</h5>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Chain ID:</span>
+                            <span className="text-white font-medium">{tradeResult.data.data[0]?.chainId || 'N/A'}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Chain Index:</span>
+                            <span className="text-white font-medium">{tradeResult.data.data[0]?.chainIndex || 'N/A'}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Context Slot:</span>
+                            <span className="text-white font-medium">{tradeResult.data.data[0]?.contextSlot || 'N/A'}</span>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Status:</span>
+                            <span className="text-green-400 font-medium">✓ Available</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">DEX Routers:</span>
+                            <span className="text-white font-medium">
+                              {tradeResult.data.data[0]?.dexRouterList ? tradeResult.data.data[0].dexRouterList.length : 0}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* DEX Router Details */}
+                    {tradeResult.data.data[0]?.dexRouterList && tradeResult.data.data[0].dexRouterList.length > 0 && (
+                      <div className="bg-gray-900/50 rounded-lg p-4">
+                        <h5 className="font-semibold text-white mb-3">Available DEX Routers</h5>
+                        <div className="space-y-3">
+                          {tradeResult.data.data[0].dexRouterList.map((router: any, index: number) => (
+                            <div key={index} className="bg-gray-800/50 rounded-lg p-3 border border-gray-700">
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-blue-400 font-medium">Router {index + 1}</span>
+                                <span className="text-green-400 font-medium">
+                                  {router.routerPercent}% Share
+                                </span>
+                              </div>
+                              <div className="text-sm text-gray-300 break-all">
+                                {router.router}
+                              </div>
+                              {/* Sub Router List */}
+                              {router.subRouterList && router.subRouterList.length > 0 && (
+                                <div className="mt-2 pt-2 border-t border-gray-600">
+                                  <div className="text-xs text-gray-400 mb-1">Sub Routers:</div>
+                                  {router.subRouterList.map((subRouter: any, subIndex: number) => (
+                                    <div key={subIndex} className="text-xs text-gray-300 ml-2">
+                                      • {subRouter.router || 'N/A'} ({subRouter.routerPercent || 'N/A'}%)
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Trading Information */}
+                    <div className="bg-gray-900/50 rounded-lg p-4">
+                      <h5 className="font-semibold text-white mb-3">Trading Information</h5>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">From Token:</span>
+                            <span className="text-white font-medium">{symbol.split('-')[0]}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">To Token:</span>
+                            <span className="text-white font-medium">{symbol.split('-')[1]}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Amount:</span>
+                            <span className="text-white font-medium">{amount}</span>
+                          </div>
+                          {/* Price Information */}
+                          {(() => {
+                            const fromToken = symbol.split('-')[0]
+                            const toToken = symbol.split('-')[1]
+                            const quoteData = tradeResult.data.data[0] as any
+                            
+                            // Check multiple possible fields for output amount
+                            const estimatedOutput = quoteData?.estimatedOutput || 
+                                                   quoteData?.outputAmount || 
+                                                   quoteData?.toAmount || 
+                                                   quoteData?.amountOut
+                            
+                            // Get tokenUnitPrice directly from API response
+                            const tokenUnitPrice = quoteData?.tokenUnitPrice
+                            
+                            return (
+                              <>
+                                {tokenUnitPrice && (
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-400">Token Price:</span>
+                                    <span className="text-green-400 font-medium">
+                                      {parseFloat(tokenUnitPrice).toFixed(6)} {toToken} 
+                                      <span className="text-xs text-blue-400 ml-1">(Raw API)</span>
+                                    </span>
+                                  </div>
+                                )}
+
+                                {estimatedOutput && (
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-400">Estimated Output:</span>
+                                    <span className="text-blue-400 font-medium">
+                                      {parseFloat(estimatedOutput).toFixed(6)} {toToken}
+                                    </span>
+                                  </div>
+                                )}
+                                {quoteData?.dexRouterList?.length > 0 && (
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-400">Available Routers:</span>
+                                    <span className="text-green-400 font-medium">
+                                      {quoteData.dexRouterList.length} DEX
+                                    </span>
+                                  </div>
+                                )}
+                              </>
+                            )
+                          })()}
+                          {tradeResult.data.data[0]?.priceImpact && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Price Impact:</span>
+                              <span className={`font-medium ${
+                                Math.abs(parseFloat(tradeResult.data.data[0].priceImpact)) < 1 
+                                  ? 'text-green-400' 
+                                  : 'text-yellow-400'
+                              }`}>
+                                {parseFloat(tradeResult.data.data[0].priceImpact).toFixed(2)}%
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Selected Chain:</span>
+                            <span className="text-blue-400 font-medium">
+                              {getChainName(selectedChain)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Slippage:</span>
+                            <span className="text-yellow-400 font-medium">0.5%</span>
+                          </div>
+                          {tradeResult.data.data[0]?.gasEstimate && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Gas Estimate:</span>
+                              <span className="text-orange-400 font-medium">
+                                {tradeResult.data.data[0].gasEstimate} GWEI
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Quote Time:</span>
+                            <span className="text-white font-medium">
+                              {new Date().toLocaleTimeString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex space-x-3">
+                      <button
+                        onClick={() => handleExecuteTrade()}
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg font-medium transition-colors"
+                      >
+                        🚀 Execute Swap
+                      </button>
+                      <button
+                        onClick={() => setTradeResult(null)}
+                        className="bg-gray-600 hover:bg-gray-700 text-white py-2 px-4 rounded-lg font-medium transition-colors"
+                      >
+                        ✕ Clear
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  // SDK Test Result Display
+                  <>
+                    {/* SDK Test Summary */}
+                    <div className="bg-gray-900/50 rounded-lg p-4">
+                      <h5 className="font-semibold text-white mb-3">SDK Test Results</h5>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Client Info:</span>
+                            <span className={`font-medium ${tradeResult.data.clientInfo?.success ? 'text-green-400' : 'text-red-400'}`}>
+                              {tradeResult.data.clientInfo?.success ? '✓ Success' : '✗ Failed'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Supported Chains:</span>
+                            <span className={`font-medium ${tradeResult.data.chains?.success ? 'text-green-400' : 'text-red-400'}`}>
+                              {tradeResult.data.chains?.success ? '✓ Success' : '✗ Failed'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Tokens:</span>
+                            <span className={`font-medium ${tradeResult.data.tokens?.success ? 'text-green-400' : 'text-red-400'}`}>
+                              {tradeResult.data.tokens?.success ? '✓ Success' : '✗ Failed'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Quote Test:</span>
+                            <span className={`font-medium ${tradeResult.data.quote?.success ? 'text-green-400' : 'text-red-400'}`}>
+                              {tradeResult.data.quote?.success ? '✓ Success' : '✗ Failed'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">SDK Status:</span>
+                            <span className="text-blue-400 font-medium">Connected</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Test Time:</span>
+                            <span className="text-white font-medium">
+                              {new Date().toLocaleTimeString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* SDK Client Info Details */}
+                    {tradeResult.data.clientInfo?.data && (
+                      <div className="bg-gray-900/50 rounded-lg p-4">
+                        <h5 className="font-semibold text-white mb-3">SDK Client Information</h5>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Client Type:</span>
+                              <span className="text-white font-medium">{tradeResult.data.clientInfo.data.clientType}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Has DEX:</span>
+                              <span className={`font-medium ${tradeResult.data.clientInfo.data.hasDex ? 'text-green-400' : 'text-red-400'}`}>
+                                {tradeResult.data.clientInfo.data.hasDex ? 'Yes' : 'No'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">DEX Type:</span>
+                              <span className="text-white font-medium">{tradeResult.data.clientInfo.data.dexType}</span>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Available Methods:</span>
+                              <span className="text-white font-medium">
+                                {tradeResult.data.clientInfo.data.dexMethods?.length || 0}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Client Keys:</span>
+                              <span className="text-white font-medium">
+                                {tradeResult.data.clientInfo.data.clientKeys?.length || 0}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex space-x-3">
+                      <button
+                        onClick={() => setTradeResult(null)}
+                        className="bg-gray-600 hover:bg-gray-700 text-white py-2 px-4 rounded-lg font-medium transition-colors"
+                      >
+                        ✕ Clear Results
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Raw JSON (Collapsible) */}
+            {tradeResult.data && (
+              <div className="mt-4">
+                <details className="bg-gray-900/30 rounded-lg">
+                  <summary className="p-3 cursor-pointer text-gray-400 hover:text-white font-medium">
+                    📄 View Raw JSON Data
+                  </summary>
+                  <div className="p-3 border-t border-gray-700">
+                    <pre className="text-xs text-gray-300 overflow-auto max-h-60 bg-gray-900 p-3 rounded">
+                      {JSON.stringify(tradeResult.data, null, 2)}
+                    </pre>
+                  </div>
+                </details>
+              </div>
+            )}
           </div>
-          <div className="flex justify-between">
-            <span>Gas Savings:</span>
-            <span className="font-medium text-green-400">90% vs Ethereum</span>
+        )}
+
+        {/* Data Summary */}
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-gray-700/50 rounded-lg p-4">
+            <h4 className="font-semibold text-white mb-2">Selected Chain</h4>
+            <div className="text-2xl font-bold text-blue-400">{selectedChain}</div>
+            <div className="text-sm text-gray-400">Chain ID</div>
+          </div>
+          <div className="bg-gray-700/50 rounded-lg p-4">
+            <h4 className="font-semibold text-white mb-2">Trading Pair</h4>
+            <div className="text-2xl font-bold text-green-400">{symbol}</div>
+            <div className="text-sm text-gray-400">Current selection</div>
+          </div>
+          <div className="bg-gray-700/50 rounded-lg p-4">
+            <h4 className="font-semibold text-white mb-2">SDK Status</h4>
+            <div className="text-2xl font-bold text-purple-400">
+              {sdkInfo?.hasDex ? 'Connected' : 'Disconnected'}
+            </div>
+            <div className="text-sm text-gray-400">OKX DEX SDK</div>
           </div>
         </div>
       </div>
