@@ -6,8 +6,10 @@ import {
   getQuote, 
   executeSwap, 
   testCompleteOKXDEXSDK,
-  getSDKClientInfo
+  getSDKClientInfo,
+  testXLayerSupport
 } from '@/api/okx-dex-sdk'
+import { testXLayerMainnetSupport } from '@/api/okx'
 
 
 interface TradeResult {
@@ -54,11 +56,11 @@ interface MarketData {
 
 export default function TradeInterface() {
   const { address, isConnected } = useAccount()
-  const [amount, setAmount] = useState('')
-  const [symbol, setSymbol] = useState('BTC-USDT')
+  const [amount, setAmount] = useState('0.1')
+  const [symbol, setSymbol] = useState('OKB-USDT')
   const [tradeResult, setTradeResult] = useState<TradeResult | null>(null)
   const [loading, setLoading] = useState(false)
-  const [selectedChain, setSelectedChain] = useState('195') // XLayer testnet
+  const [selectedChain, setSelectedChain] = useState('196') // XLayer mainnet
   const [sdkInfo, setSdkInfo] = useState<any>(null)
 
 
@@ -102,9 +104,6 @@ export default function TradeInterface() {
         toTokenAddress,
         amount: amountInWei
       })
-
-
-
 
       const result = await getQuote({
         chainIndex: selectedChain,
@@ -152,6 +151,60 @@ export default function TradeInterface() {
     }
   }
 
+  const handleExecuteSwap = async () => {
+    if (!symbol || !amount || !selectedChain || !address) {
+      alert('Please fill in all fields and connect wallet')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const fromTokenAddress = getTokenAddress(symbol.split('-')[0])
+      const toTokenAddress = getTokenAddress(symbol.split('-')[1])
+      const amountInWei = convertToWei(amount, symbol.split('-')[0])
+
+      console.log('🚀 Executing swap with parameters:', {
+        chainIndex: selectedChain,
+        fromTokenAddress,
+        toTokenAddress,
+        amount: amountInWei,
+        userWalletAddress: address
+      })
+
+      const result = await executeSwap({
+        chainIndex: selectedChain,
+        fromTokenAddress,
+        toTokenAddress,
+        amount: amountInWei,
+        slippage: '0.5',
+        userWalletAddress: address
+      })
+
+      if (result.success) {
+        console.log('✅ Swap executed successfully:', result.data)
+        setTradeResult({
+          success: true,
+          message: 'Swap executed successfully! Check your wallet for the transaction.',
+          data: result.data
+        })
+      } else {
+        console.error('❌ Swap failed:', result.error)
+        setTradeResult({
+          success: false,
+          message: result.message || 'Failed to execute swap'
+        })
+      }
+    } catch (error) {
+      console.error('Swap execution failed:', error)
+      setTradeResult({
+        success: false,
+        message: 'Failed to execute swap'
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleTestSDK = async () => {
     try {
       setLoading(true)
@@ -185,6 +238,72 @@ export default function TradeInterface() {
     }
   }
 
+  const handleTestXLayer = async () => {
+    try {
+      setLoading(true)
+      setTradeResult({
+        success: false,
+        message: 'Testing XLayer mainnet support...'
+      })
+
+      const result = await testXLayerSupport()
+      
+      if (result && result.success) {
+        setTradeResult({
+          success: true,
+          message: 'XLayer support test successful!',
+          data: result
+        })
+      } else {
+        setTradeResult({
+          success: false,
+          message: result?.message || 'XLayer mainnet support test failed'
+        })
+      }
+    } catch (error: any) {
+      console.error('XLayer test error:', error)
+      setTradeResult({
+        success: false,
+        message: error.message || 'Failed to test XLayer mainnet support'
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleTestXLayerMainnet = async () => {
+    try {
+      setLoading(true)
+      setTradeResult({
+        success: false,
+        message: 'Testing XLayer mainnet API support...'
+      })
+
+      const result = await testXLayerMainnetSupport()
+      
+      if (result && result.success) {
+        setTradeResult({
+          success: true,
+          message: 'XLayer mainnet API test successful!',
+          data: result
+        })
+      } else {
+        setTradeResult({
+          success: false,
+          message: result?.message || 'XLayer mainnet API test failed'
+        })
+      }
+    } catch (error: any) {
+      console.error('XLayer API test error:', error)
+      setTradeResult({
+        success: false,
+        message: error.message || 'Failed to test XLayer mainnet API'
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleRefreshSDKInfo = async () => {
     await fetchSDKInfo()
   }
@@ -207,7 +326,8 @@ export default function TradeInterface() {
         '56': '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', // BSC
         '42161': '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', // Arbitrum
         '10': '0x7F5c764cBc14f9669B88837ca1490cCa17c31607', // Optimism
-        '195': '0x176211869cA2b568f2A7D4EE941E073a821EE1ff'  // XLayer Testnet
+        '195': '0x176211869cA2b568f2A7D4EE941E073a821EE1ff',  // XLayer Testnet
+        '196': '0x176211869cA2b568f2A7D4EE941E073a821EE1ff'  // XLayer Mainnet
       },
       'USDT': {
         '1': '0xdAC17F958D2ee523a2206206994597C13D831ec7', // Ethereum
@@ -215,7 +335,8 @@ export default function TradeInterface() {
         '56': '0x55d398326f99059fF775485246999027B3197955', // BSC
         '42161': '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', // Arbitrum
         '10': '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', // Optimism
-        '195': '0x9e5AAC1Ba1a2e6aEd6b32689DFcF62A509Ca96f3'  // XLayer Testnet
+        '195': '0x9e5AAC1Ba1a2e6aEd6b32689DFcF62A509Ca96f3',  // XLayer Testnet
+        '196': '0x9e5AAC1Ba1a2e6aEd6b32689DFcF62A509Ca96f3'  // XLayer Mainnet
       },
       'BTC': {
         '1': '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', // Ethereum (WBTC)
@@ -234,7 +355,8 @@ export default function TradeInterface() {
         '196': '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599'  // XLayer Mainnet
       },
       'OKB': {
-        '195': '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'  // XLayer Testnet (Native)
+        '195': '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',  // XLayer Testnet (Native)
+        '196': '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'  // XLayer Mainnet (Native)
       },
       'MATIC': {
         '137': '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' // Polygon (Native)
@@ -355,6 +477,20 @@ export default function TradeInterface() {
             >
               🧪 Test SDK
             </button>
+            <button
+              onClick={handleTestXLayer}
+              disabled={loading}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50"
+            >
+              🧪 Test XLayer Mainnet
+            </button>
+            <button
+              onClick={handleTestXLayerMainnet}
+              disabled={loading}
+              className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors disabled:opacity-50"
+            >
+              🔍 Test XLayer API
+            </button>
           </div>
         </div>
 
@@ -408,7 +544,7 @@ export default function TradeInterface() {
           <h3 className="text-lg font-semibold mb-4 text-gray-300">Select Blockchain</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { id: '195', name: 'XLayer Testnet', currency: 'OKB', featured: true },
+              { id: '196', name: 'XLayer Mainnet', currency: 'OKB', featured: true },
               { id: '1', name: 'Ethereum', currency: 'ETH' },
               { id: '137', name: 'Polygon', currency: 'MATIC' },
               { id: '56', name: 'BSC', currency: 'BNB' },
@@ -482,7 +618,17 @@ export default function TradeInterface() {
               >
                 {loading ? 'Processing...' : 'Get Quote'}
               </button>
-
+              <button
+                onClick={handleExecuteSwap}
+                disabled={!isConnected || loading || !tradeResult?.success}
+                className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${
+                  !isConnected || loading || !tradeResult?.success
+                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                    : 'bg-green-600 hover:bg-green-700 text-white'
+                }`}
+              >
+                {loading ? 'Processing...' : 'Execute Swap'}
+              </button>
             </div>
           </div>
         </div>
@@ -687,10 +833,15 @@ export default function TradeInterface() {
                     {/* Action Buttons */}
                     <div className="flex space-x-3">
                       <button
-                        onClick={() => handleExecuteTrade()}
-                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg font-medium transition-colors"
+                        onClick={handleExecuteSwap}
+                        disabled={!isConnected || loading}
+                        className={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors ${
+                          !isConnected || loading
+                            ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                            : 'bg-green-600 hover:bg-green-700 text-white'
+                        }`}
                       >
-                        🚀 Execute Swap
+                        {loading ? 'Processing...' : '🚀 Execute Swap'}
                       </button>
                       <button
                         onClick={() => setTradeResult(null)}
@@ -698,6 +849,89 @@ export default function TradeInterface() {
                       >
                         ✕ Clear
                       </button>
+                    </div>
+                  </>
+                ) : tradeResult.data.quoteResults ? (
+                  // XLayer Test Result Display
+                  <>
+                    {/* XLayer Test Summary */}
+                    <div className="bg-gray-900/50 rounded-lg p-4">
+                      <h5 className="font-semibold text-white mb-3">XLayer Mainnet Support Test Results</h5>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Supported Chains:</span>
+                            <span className={`font-medium ${tradeResult.data.chains?.success ? 'text-green-400' : 'text-red-400'}`}>
+                              {tradeResult.data.chains?.success ? '✓ Success' : '✗ Failed'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">XLayer Mainnet Tokens:</span>
+                            <span className={`font-medium ${tradeResult.data.xlayerMainnetTokens?.success ? 'text-green-400' : 'text-red-400'}`}>
+                              {tradeResult.data.xlayerMainnetTokens?.success ? '✓ Success' : '✗ Failed'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Liquidity Sources:</span>
+                            <span className={`font-medium ${tradeResult.data.xlayerLiquidity?.code === '0' ? 'text-green-400' : 'text-red-400'}`}>
+                              {tradeResult.data.xlayerLiquidity?.code === '0' ? '✓ Available' : '✗ Failed'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Test Time:</span>
+                            <span className="text-white font-medium">
+                              {new Date().toLocaleTimeString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Liquidity Sources */}
+                    {tradeResult.data.xlayerLiquidity?.code === '0' && tradeResult.data.xlayerLiquidity?.data && (
+                      <div className="bg-gray-900/50 rounded-lg p-4">
+                        <h5 className="font-semibold text-white mb-3">Available Liquidity Sources on XLayer Mainnet</h5>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          {tradeResult.data.xlayerLiquidity.data.slice(0, 8).map((source: any, index: number) => (
+                            <div key={index} className="bg-gray-800/50 rounded-lg p-2 border border-gray-700">
+                              <div className="text-sm text-blue-400 font-medium">{source.name}</div>
+                              <div className="text-xs text-gray-400">ID: {source.id}</div>
+                            </div>
+                          ))}
+                          {tradeResult.data.xlayerLiquidity.data.length > 8 && (
+                            <div className="bg-gray-800/50 rounded-lg p-2 border border-gray-700 flex items-center justify-center">
+                              <div className="text-sm text-gray-400">
+                                +{tradeResult.data.xlayerLiquidity.data.length - 8} more
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div className="mt-3 text-sm text-gray-400">
+                          Total: {tradeResult.data.xlayerLiquidity.data.length} liquidity sources available
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Trading Pairs Test Results */}
+                    <div className="bg-gray-900/50 rounded-lg p-4">
+                      <h5 className="font-semibold text-white mb-3">Trading Pairs Test Results</h5>
+                      <div className="space-y-3">
+                        {tradeResult.data.quoteResults.map((result: any, index: number) => (
+                          <div key={index} className="bg-gray-800/50 rounded-lg p-3 border border-gray-700">
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="text-blue-400 font-medium">{result.pair}</span>
+                              <span className={`font-medium ${result.success ? 'text-green-400' : 'text-red-400'}`}>
+                                {result.success ? '✓ Success' : '✗ Failed'}
+                              </span>
+                            </div>
+                            <div className="text-sm text-gray-300">
+                              {result.message}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </>
                 ) : (

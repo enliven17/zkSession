@@ -1,4 +1,5 @@
 import { OKXDexClient } from '@okx-dex/okx-dex-sdk'
+import { getSwapQuote, getLiquiditySources } from './okx'
 
 // OKX DEX SDK configuration
 const OKX_API_KEY = process.env.NEXT_PUBLIC_OKX_API_KEY || ''
@@ -42,6 +43,35 @@ export const getQuote = async (params: {
       }
     }
 
+    // Check if client.dex exists
+    if (!client.dex) {
+      console.error('❌ Client.dex is undefined')
+      return {
+        success: false,
+        error: 'DEX module not available',
+        message: 'OKX DEX module not available in SDK'
+      }
+    }
+
+    // Check if getQuote method exists
+    if (typeof client.dex.getQuote !== 'function') {
+      console.error('❌ getQuote method not found in client.dex')
+      console.log('Available methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(client.dex)))
+      return {
+        success: false,
+        error: 'getQuote method not available',
+        message: 'getQuote method not available in OKX DEX SDK'
+      }
+    }
+
+    console.log('🔍 Calling client.dex.getQuote with params:', {
+      chainId: params.chainIndex,
+      fromTokenAddress: params.fromTokenAddress,
+      toTokenAddress: params.toTokenAddress,
+      amount: params.amount,
+      slippage: params.slippage || '0.5'
+    })
+
     // Use the correct SDK method as per documentation
     const response = await client.dex.getQuote({
       chainId: params.chainIndex,
@@ -58,11 +88,43 @@ export const getQuote = async (params: {
       message: 'Quote fetched successfully from SDK'
     }
   } catch (error: any) {
-    console.error('❌ Failed to get quote from SDK:', error.message)
+    console.error('❌ Failed to get quote from SDK:', error)
+    console.error('❌ Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    })
+    
+    // Fallback to OKX API if SDK fails
+    console.log('🔄 Trying fallback to OKX API...')
+    try {
+      const apiQuote = await getSwapQuote({
+        chainIndex: params.chainIndex,
+        amount: params.amount,
+        swapMode: 'exactIn',
+        fromTokenAddress: params.fromTokenAddress,
+        toTokenAddress: params.toTokenAddress,
+        userWalletAddress: params.userWalletAddress
+      })
+      
+      if (apiQuote.success) {
+        console.log('✅ Fallback API quote successful:', apiQuote)
+        return {
+          success: true,
+          data: apiQuote,
+          message: 'Quote fetched successfully via API fallback'
+        }
+      } else {
+        console.log('❌ Fallback API quote failed:', apiQuote.message)
+      }
+    } catch (apiError: any) {
+      console.error('❌ Fallback API also failed:', apiError.message)
+    }
+    
     return {
       success: false,
       error: error.message,
-      message: 'Failed to get quote from SDK'
+      message: 'Failed to get quote from SDK: ' + error.message
     }
   }
 }
@@ -274,42 +336,87 @@ export const testCompleteOKXDEXSDK = async () => {
   }
 } 
 
-// 7. Test XLayer Testnet Support
+// 7. Test XLayer Mainnet Support
 export const testXLayerSupport = async () => {
   try {
-    console.log('🔍 Testing XLayer testnet support...')
+    console.log('🔍 Testing XLayer mainnet support...')
     
     // Test 1: Get supported chains
     console.log('📋 Test 1: Getting supported chains...')
     const chainsResult = await getSupportedChains()
     
-    // Test 2: Try to get tokens for XLayer testnet (chain 195)
-    console.log('🪙 Test 2: Getting tokens for XLayer testnet (chain 195)...')
-    const xlayerTokensResult = await getTokensForChain('195')
+    // Test 2: Get liquidity sources for XLayer mainnet
+    console.log('💧 Test 2: Getting liquidity sources for XLayer mainnet...')
+    const xlayerLiquidityResult = await getLiquiditySources('196')
     
-    // Test 3: Try to get quote for XLayer testnet
-    console.log('💱 Test 3: Getting quote for XLayer testnet...')
-    const xlayerQuoteResult = await getQuote({
-      chainIndex: '195',
-      fromTokenAddress: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', // OKB (native)
-      toTokenAddress: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', // USDC
-      amount: '1000000000000000000', // 1 OKB
-      slippage: '0.5'
-    })
+    // Test 3: Try to get tokens for XLayer mainnet (chain 196)
+    console.log('🪙 Test 3: Getting tokens for XLayer mainnet (chain 196)...')
+    const xlayerMainnetTokensResult = await getTokensForChain('196')
+    
+    // Test 4: Try multiple trading pairs for XLayer mainnet
+    console.log('💱 Test 4: Testing multiple trading pairs...')
+    
+    const testPairs = [
+      {
+        name: 'OKB-USDT',
+        fromToken: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', // OKB (native)
+        toToken: '0x9e5AAC1Ba1a2e6aEd6b32689DFcF62A509Ca96f3', // USDT
+        amount: '100000000000000000' // 0.1 OKB
+      },
+      {
+        name: 'OKB-USDC',
+        fromToken: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', // OKB (native)
+        toToken: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', // USDC
+        amount: '100000000000000000' // 0.1 OKB
+      },
+      {
+        name: 'USDT-USDC',
+        fromToken: '0x9e5AAC1Ba1a2e6aEd6b32689DFcF62A509Ca96f3', // USDT
+        toToken: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', // USDC
+        amount: '1000000' // 1 USDT
+      }
+    ]
+    
+    const quoteResults = []
+    
+    for (const pair of testPairs) {
+      console.log(`🔍 Testing ${pair.name}...`)
+      try {
+        const result = await getQuote({
+          chainIndex: '196',
+          fromTokenAddress: pair.fromToken,
+          toTokenAddress: pair.toToken,
+          amount: pair.amount,
+          slippage: '0.5'
+        })
+        quoteResults.push({
+          pair: pair.name,
+          success: result.success,
+          message: result.message
+        })
+      } catch (error: any) {
+        quoteResults.push({
+          pair: pair.name,
+          success: false,
+          message: error.message
+        })
+      }
+    }
     
     return {
       success: true,
       chains: chainsResult,
-      xlayerTokens: xlayerTokensResult,
-      xlayerQuote: xlayerQuoteResult,
-      message: 'XLayer testnet support test completed!'
+      xlayerLiquidity: xlayerLiquidityResult,
+      xlayerMainnetTokens: xlayerMainnetTokensResult,
+      quoteResults: quoteResults,
+      message: 'XLayer mainnet support test completed with liquidity check!'
     }
   } catch (error: any) {
-    console.error('❌ XLayer testnet support test failed:', error.message)
+    console.error('❌ XLayer mainnet support test failed:', error.message)
     return {
       success: false,
       error: error.message,
-      message: 'XLayer testnet support test failed. Check console for details.'
+      message: 'XLayer mainnet support test failed. Check console for details.'
     }
   }
 } 

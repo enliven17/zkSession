@@ -40,7 +40,7 @@ export interface TokenInfo {
   price?: string
 }
 
-// Token addresses for XLayer testnet (OKX DEX supported)
+// Token addresses for XLayer (both testnet and mainnet)
 export const TOKENS: { [key: string]: TokenInfo } = {
   'ETH': {
     symbol: 'ETH',
@@ -66,6 +66,40 @@ export const TOKENS: { [key: string]: TokenInfo } = {
     symbol: 'BTC',
     address: '0x9a5b2c5054c3e9c43864736a3cd11a3042aa6c38', // XLayer testnet WBTC (same as BTC)
     decimals: 8
+  },
+  'OKB': {
+    symbol: 'OKB',
+    address: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', // XLayer native token
+    decimals: 18
+  }
+}
+
+// XLayer Mainnet Token Addresses
+export const XLAYER_MAINNET_TOKENS: { [key: string]: TokenInfo } = {
+  'USDT': {
+    symbol: 'USDT',
+    address: '0x9e5AAC1Ba1a2e6aEd6b32689DFcF62A509Ca96f3', // XLayer mainnet USDT
+    decimals: 6
+  },
+  'USDC': {
+    symbol: 'USDC',
+    address: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', // XLayer mainnet USDC
+    decimals: 6
+  },
+  'WBTC': {
+    symbol: 'WBTC',
+    address: '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', // XLayer mainnet WBTC
+    decimals: 8
+  },
+  'BTC': {
+    symbol: 'BTC',
+    address: '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', // XLayer mainnet WBTC (same as BTC)
+    decimals: 8
+  },
+  'OKB': {
+    symbol: 'OKB',
+    address: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', // XLayer mainnet native token
+    decimals: 18
   }
 }
 
@@ -453,6 +487,16 @@ export const getSupportedChains = async () => {
       }
     })
     console.log('✅ OKX DEX supported chains response:', response.data)
+    
+    // Check if XLayer mainnet (196) is in the supported chains
+    if (response.data && response.data.data) {
+      const xlayerMainnet = response.data.data.find((chain: any) => chain.chainId === '196' || chain.chainIndex === '196')
+      console.log('🔍 XLayer Mainnet (196) support status:', xlayerMainnet ? '✓ Supported' : '✗ Not Supported')
+      if (xlayerMainnet) {
+        console.log('📋 XLayer Mainnet details:', xlayerMainnet)
+      }
+    }
+    
     return response.data
   } catch (error: any) {
     console.error('❌ Failed to get supported chains:', error.response?.data || error.message)
@@ -515,6 +559,117 @@ export const getDEXQuote = async (fromToken: string, toToken: string, amount: st
   }
 }
 
+// Get liquidity sources for a specific chain
+export const getLiquiditySources = async (chainIndex: string) => {
+  try {
+    console.log(`🔍 Getting liquidity sources for chain ${chainIndex}...`)
+    const timestamp = new Date().toISOString()
+    const requestPath = `/api/v5/dex/aggregator/get-liquidity?chainIndex=${chainIndex}`
+    const signature = await createSignature(timestamp, 'GET', requestPath)
+    
+    const response = await axios.get(`${OKX_DEX_API_BASE}${requestPath}`, {
+      headers: {
+        'OK-ACCESS-KEY': OKX_API_KEY,
+        'OK-ACCESS-SIGN': signature,
+        'OK-ACCESS-PASSPHRASE': OKX_PASSPHRASE,
+        'OK-ACCESS-TIMESTAMP': timestamp
+      }
+    })
+    
+    console.log(`✅ Liquidity sources for chain ${chainIndex}:`, response.data)
+    return response.data
+  } catch (error: any) {
+    console.error(`❌ Failed to get liquidity sources for chain ${chainIndex}:`, error.response?.data || error.message)
+    return null
+  }
+}
+
+// Test XLayer Mainnet specifically
+export const testXLayerMainnetSupport = async () => {
+  try {
+    console.log('🔍 Testing XLayer Mainnet support specifically...')
+    
+    // Test 1: Get supported chains and check XLayer
+    console.log('📋 Test 1: Checking if XLayer mainnet is supported...')
+    const chainsResult = await getSupportedChains()
+    
+    // Test 2: Try to get tokens for XLayer mainnet
+    console.log('🪙 Test 2: Getting tokens for XLayer mainnet...')
+    const tokensResult = await getAllSupportedTokens()
+    
+    // Test 3: Get liquidity sources for XLayer mainnet
+    console.log('💧 Test 3: Getting liquidity sources for XLayer mainnet...')
+    const xlayerLiquidityResult = await getLiquiditySources('196')
+    
+    // Test 4: Try different quote approaches for XLayer mainnet
+    console.log('💱 Test 4: Testing different quote approaches...')
+    
+    const quoteTests = [
+      {
+        name: 'OKB-USDT (Native)',
+        fromToken: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        toToken: '0x9e5AAC1Ba1a2e6aEd6b32689DFcF62A509Ca96f3',
+        amount: '100000000000000000' // 0.1 OKB
+      },
+      {
+        name: 'OKB-USDC (Native)',
+        fromToken: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        toToken: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff',
+        amount: '100000000000000000' // 0.1 OKB
+      },
+      {
+        name: 'WETH-USDT (Wrapped)',
+        fromToken: '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', // WBTC as WETH proxy
+        toToken: '0x9e5AAC1Ba1a2e6aEd6b32689DFcF62A509Ca96f3',
+        amount: '100000000000000000' // 0.1 WETH
+      }
+    ]
+    
+    const quoteResults = []
+    
+    for (const test of quoteTests) {
+      console.log(`🔍 Testing ${test.name}...`)
+      try {
+        const result = await getSwapQuote({
+          chainIndex: '196',
+          amount: test.amount,
+          swapMode: 'exactIn',
+          fromTokenAddress: test.fromToken,
+          toTokenAddress: test.toToken
+        })
+        quoteResults.push({
+          pair: test.name,
+          success: result.success,
+          message: result.message,
+          data: result.tx
+        })
+      } catch (error: any) {
+        quoteResults.push({
+          pair: test.name,
+          success: false,
+          message: error.message
+        })
+      }
+    }
+    
+    return {
+      success: true,
+      chains: chainsResult,
+      tokens: tokensResult,
+      xlayerLiquidity: xlayerLiquidityResult,
+      quoteResults: quoteResults,
+      message: 'XLayer Mainnet specific test completed!'
+    }
+  } catch (error: any) {
+    console.error('❌ XLayer Mainnet test failed:', error.response?.data || error.message)
+    return {
+      success: false,
+      error: error.response?.data || error.message,
+      message: 'XLayer Mainnet test failed. Check console for details.'
+    }
+  }
+}
+
 // Test OKX DEX API connectivity with correct endpoints
 export const testOKXDEXAPI = async () => {
   try {
@@ -528,15 +683,30 @@ export const testOKXDEXAPI = async () => {
     console.log('🪙 Test 2: Getting all tokens...')
     const tokensResult = await getAllSupportedTokens()
     
-    // Test 3: Get quote for ETH to USDC on Ethereum mainnet
-    console.log('💱 Test 3: Getting quote for ETH to USDC...')
+    // Test 3: Get liquidity sources for Ethereum mainnet
+    console.log('💧 Test 3: Getting liquidity sources for Ethereum...')
+    const ethereumLiquidityResult = await getLiquiditySources('1')
+    
+    // Test 4: Get liquidity sources for XLayer mainnet
+    console.log('💧 Test 4: Getting liquidity sources for XLayer mainnet...')
+    const xlayerLiquidityResult = await getLiquiditySources('196')
+    
+    // Test 5: Get quote for ETH to USDC on Ethereum mainnet
+    console.log('💱 Test 5: Getting quote for ETH to USDC...')
     const quoteResult = await getDEXQuote('ETH', 'USDC', '1000000000000000000', '1') // 1 ETH
+    
+    // Test 6: Get quote for OKB to USDC on XLayer mainnet
+    console.log('💱 Test 6: Getting quote for OKB to USDC on XLayer mainnet...')
+    const xlayerQuoteResult = await getDEXQuote('OKB', 'USDC', '1000000000000000000', '196') // 1 OKB
     
     return {
       success: true,
       chains: chainsResult,
       tokens: tokensResult,
+      ethereumLiquidity: ethereumLiquidityResult,
+      xlayerLiquidity: xlayerLiquidityResult,
       quote: quoteResult,
+      xlayerQuote: xlayerQuoteResult,
       message: 'All OKX DEX API tests completed successfully!'
     }
   } catch (error: any) {
