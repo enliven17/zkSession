@@ -121,9 +121,9 @@ export default function TradeInterface() {
         setTradeResult(result)
       }
 
-      if (result.data && result.data.data && result.data.data[0]) {
+      if (result.data && Array.isArray(result.data) && result.data.length > 0) {
         console.log('🔍 Quote Data Structure:')
-        const quoteData = result.data.data[0] as any
+        const quoteData = result.data[0] as any
         console.log('- Chain ID:', quoteData.chainId)
         console.log('- Chain Index:', quoteData.chainIndex)
         console.log('- All available fields:', Object.keys(quoteData))

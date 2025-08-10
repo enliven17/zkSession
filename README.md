@@ -193,11 +193,6 @@ src/
 
 MIT License - see LICENSE file for details
 
-## 🆘 Support
-
-- **Documentation**: [Project Wiki](link-to-wiki)
-- **Issues**: [GitHub Issues](link-to-issues)
-- **Discord**: [Community Server](link-to-discord)
 
 ## 🔮 Roadmap
 
