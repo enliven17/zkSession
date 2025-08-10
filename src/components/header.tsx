@@ -24,13 +24,17 @@ export function Header() {
     return (
       <header className="bg-gray-900/80 backdrop-blur-md shadow-sm border-b border-gray-800 sticky top-0 z-50">
         <div className="container mx-auto px-4 py-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center">
-                <Shield className="h-5 w-5 text-white" />
-              </div>
-              <span className="text-lg font-bold text-white">zkSession</span>
+                  <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center overflow-hidden">
+              <img 
+                src="/favicon.ico" 
+                alt="zkSession Logo" 
+                className="w-6 h-6 object-contain"
+              />
             </div>
+            <span className="text-lg font-bold text-white">zkSession</span>
+          </div>
             <div className="w-32 h-8 bg-gray-800 rounded animate-pulse"></div>
           </div>
         </div>
@@ -44,8 +48,12 @@ export function Header() {
         <div className="flex items-center justify-between">
           {/* Logo */}
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center">
-              <Shield className="h-5 w-5 text-white" />
+            <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center overflow-hidden">
+              <img 
+                src="/favicon.ico" 
+                alt="zkSession Logo" 
+                className="w-6 h-6 object-contain"
+              />
             </div>
             <span className="text-lg font-bold text-white">zkSession</span>
           </div>
